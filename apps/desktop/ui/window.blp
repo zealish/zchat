@@ -1,0 +1,121 @@
+using Gtk 4.0;
+using Adw 1;
+
+Adw.ApplicationWindow window {
+  title: "ZChat";
+  default-width: 1000;
+  default-height: 700;
+
+  content: Adw.ToastOverlay toast_overlay {
+    child: Gtk.Stack main_stack {
+      transition-type: crossfade;
+
+      Gtk.StackPage {
+        name: "qr";
+        child: Adw.ToolbarView {
+          [top]
+          Adw.HeaderBar {}
+
+          content: Adw.StatusPage qr_page {
+            title: "Scan to log in";
+            description: "Open WhatsApp on your phone → Linked devices → Link a device";
+
+            child: Gtk.Picture qr_image {
+              width-request: 320;
+              height-request: 320;
+              can-shrink: false;
+            };
+          };
+        };
+      }
+
+      Gtk.StackPage {
+        name: "chat";
+        child: Adw.NavigationSplitView split_view {
+          min-sidebar-width: 280;
+          max-sidebar-width: 360;
+
+          sidebar: Adw.NavigationPage {
+            title: "Chats";
+
+            child: Adw.ToolbarView {
+              [top]
+              Adw.HeaderBar {}
+
+              [top]
+              Gtk.Box {
+                orientation: horizontal;
+                margin-start: 6;
+                margin-end: 6;
+                margin-bottom: 6;
+
+                Adw.ToggleGroup chat_filter {
+                  hexpand: true;
+                  homogeneous: true;
+
+                  Adw.Toggle {
+                    name: "direct";
+                    label: "Chats";
+                  }
+
+                  Adw.Toggle {
+                    name: "groups";
+                    label: "Groups";
+                  }
+                }
+              }
+
+              content: Gtk.ScrolledWindow {
+                hscrollbar-policy: never;
+                vexpand: true;
+
+                child: Gtk.ListView chat_list {
+                  styles ["navigation-sidebar"]
+                };
+              };
+            };
+          };
+
+          content: Adw.NavigationPage content_page {
+            title: "Conversation";
+
+            child: Adw.ToolbarView {
+              [top]
+              Adw.HeaderBar {}
+
+              content: Gtk.ScrolledWindow message_scroll {
+                hscrollbar-policy: never;
+                vexpand: true;
+
+                child: Gtk.ListView message_list {
+                  styles ["zchat-messages"]
+                };
+              };
+
+              [bottom]
+              Gtk.Box {
+                orientation: horizontal;
+                spacing: 6;
+                margin-start: 12;
+                margin-end: 12;
+                margin-top: 6;
+                margin-bottom: 12;
+
+                Gtk.Entry message_entry {
+                  hexpand: true;
+                  placeholder-text: "Write a message";
+                }
+
+                Gtk.Button send_button {
+                  icon-name: "document-send-symbolic";
+                  tooltip-text: "Send";
+                  styles ["suggested-action", "circular"]
+                }
+              }
+            };
+          };
+        };
+      }
+    };
+  };
+}

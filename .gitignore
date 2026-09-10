@@ -1,0 +1,4 @@
+/build/
+/dist/
+*.gresource
+apps/desktop/ui/*.ui

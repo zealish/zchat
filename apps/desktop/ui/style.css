@@ -1,0 +1,42 @@
+@define-color accent_bg_color #25D366;
+@define-color accent_color #128C7E;
+
+.zchat-message {
+  font-family: Inter, sans-serif;
+}
+
+.zchat-bubble {
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+
+.zchat-bubble-in {
+  background-color: alpha(currentColor, 0.08);
+}
+
+.zchat-bubble-out {
+  background-color: alpha(@accent_bg_color, 0.22);
+}
+
+.zchat-messages {
+  background: none;
+}
+
+.zchat-timestamp {
+  font-size: 0.8em;
+  opacity: 0.6;
+}
+
+.zchat-sender {
+  font-size: 0.85em;
+  font-weight: bold;
+  color: @accent_color;
+}
+
+.zchat-unread {
+  background-color: @accent_bg_color;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 0.8em;
+}
