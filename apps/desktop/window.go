@@ -46,6 +46,7 @@ type window struct {
 	messageScrl  *gtk.ScrolledWindow
 	messageEntry *gtk.Entry
 	sendButton   *gtk.Button
+	searchEntry  *gtk.SearchEntry
 
 	chats             *gioutil.ListModel[*zchatv1.Chat]
 	chatSel           *gtk.SingleSelection
@@ -54,6 +55,9 @@ type window struct {
 	chatOrder         []*zchatv1.Chat
 	chatIndex         map[string]*zchatv1.Chat
 	chatRebuildQueued bool
+	searchQuery       string
+	searchResults     []*zchatv1.Chat
+	mediaHandlers     map[*gtk.Button]coreglib.SignalHandle
 	showGroups        bool
 	stickToBottom     bool
 	bottomQueued      bool
@@ -68,32 +72,35 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 	builder := gtk.NewBuilderFromResource("/com/zealish/ZChat/window.ui")
 
 	w := &window{
-		ctx:          ctx,
-		log:          log,
-		app:          app,
-		sock:         socketPath,
-		win:          builder.GetObject("window").Cast().(*adw.ApplicationWindow),
-		toastOverlay: builder.GetObject("toast_overlay").Cast().(*adw.ToastOverlay),
-		mainStack:    builder.GetObject("main_stack").Cast().(*gtk.Stack),
-		qrImage:      builder.GetObject("qr_image").Cast().(*gtk.Picture),
-		splitView:    builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
-		contentPage:  builder.GetObject("content_page").Cast().(*adw.NavigationPage),
-		chatList:     builder.GetObject("chat_list").Cast().(*gtk.ListView),
-		chatFilter:   builder.GetObject("chat_filter").Cast().(*adw.ToggleGroup),
-		messageList:  builder.GetObject("message_list").Cast().(*gtk.ListView),
-		messageScrl:  builder.GetObject("message_scroll").Cast().(*gtk.ScrolledWindow),
-		messageEntry: builder.GetObject("message_entry").Cast().(*gtk.Entry),
-		sendButton:   builder.GetObject("send_button").Cast().(*gtk.Button),
-		chats:        chatModelType.New(),
-		messages:     messageModelType.New(),
-		chatIndex:    make(map[string]*zchatv1.Chat),
-		messageRows:  make(map[string]*gtk.ListItem),
+		ctx:           ctx,
+		log:           log,
+		app:           app,
+		sock:          socketPath,
+		win:           builder.GetObject("window").Cast().(*adw.ApplicationWindow),
+		toastOverlay:  builder.GetObject("toast_overlay").Cast().(*adw.ToastOverlay),
+		mainStack:     builder.GetObject("main_stack").Cast().(*gtk.Stack),
+		qrImage:       builder.GetObject("qr_image").Cast().(*gtk.Picture),
+		splitView:     builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
+		contentPage:   builder.GetObject("content_page").Cast().(*adw.NavigationPage),
+		chatList:      builder.GetObject("chat_list").Cast().(*gtk.ListView),
+		chatFilter:    builder.GetObject("chat_filter").Cast().(*adw.ToggleGroup),
+		messageList:   builder.GetObject("message_list").Cast().(*gtk.ListView),
+		messageScrl:   builder.GetObject("message_scroll").Cast().(*gtk.ScrolledWindow),
+		messageEntry:  builder.GetObject("message_entry").Cast().(*gtk.Entry),
+		sendButton:    builder.GetObject("send_button").Cast().(*gtk.Button),
+		searchEntry:   builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
+		chats:         chatModelType.New(),
+		messages:      messageModelType.New(),
+		chatIndex:     make(map[string]*zchatv1.Chat),
+		messageRows:   make(map[string]*gtk.ListItem),
+		mediaHandlers: make(map[*gtk.Button]coreglib.SignalHandle),
 	}
 
 	w.win.SetApplication(&app.Application)
 	w.setupChatList()
 	w.setupMessageList()
 	w.setupComposer()
+	w.setupSearch()
 	w.setupAutoScroll()
 	w.mainStack.SetVisibleChildName("qr")
 
@@ -140,6 +147,7 @@ func (w *window) onEvent(evt *zchatv1.Event) {
 	case *zchatv1.Event_ChatUpdated:
 		w.upsertChat(payload.ChatUpdated)
 	case *zchatv1.Event_MessageReceived:
+		w.notify(payload.MessageReceived)
 		w.onMessage(payload.MessageReceived, false)
 	case *zchatv1.Event_MessageUpdated:
 		w.onMessage(payload.MessageUpdated, true)
@@ -225,6 +233,13 @@ func (w *window) scheduleChatRebuild() {
 }
 
 func (w *window) rebuildChatModel() {
+	// A search shows daemon-ranked results verbatim, ignoring the group filter
+	// so a query never silently hides matches on the other tab.
+	if w.searchQuery != "" {
+		w.chats.Splice(0, w.chats.Len(), w.searchResults...)
+		return
+	}
+
 	sort.SliceStable(w.chatOrder, func(i, j int) bool {
 		a, b := w.chatOrder[i], w.chatOrder[j]
 		if a.GetPinned() != b.GetPinned() {
@@ -251,6 +266,35 @@ func (w *window) rebuildChatModel() {
 			}
 		}
 	}
+}
+
+// setupSearch swaps the sidebar between the chat list and daemon-side search
+// results as the query changes.
+func (w *window) setupSearch() {
+	w.searchEntry.ConnectSearchChanged(func() {
+		query := strings.TrimSpace(w.searchEntry.Text())
+		w.searchQuery = query
+		if query == "" {
+			w.searchResults = nil
+			w.rebuildChatModel()
+			return
+		}
+		if w.client == nil {
+			return
+		}
+		w.client.SearchChats(w.ctx, query, func(q string, chats []*zchatv1.Chat, err error) {
+			// Slower earlier queries must not overwrite the newest results.
+			if q != w.searchQuery {
+				return
+			}
+			if err != nil {
+				w.log.Error().Err(err).Msg("search chats")
+				return
+			}
+			w.searchResults = chats
+			w.rebuildChatModel()
+		})
+	})
 }
 
 func (w *window) setupChatList() {
@@ -378,6 +422,7 @@ func (w *window) onMessage(msg *zchatv1.Message, isUpdate bool) {
 		existing.SenderName = msg.GetSenderName()
 		existing.Timestamp = msg.GetTimestamp()
 		existing.Status = msg.GetStatus()
+		existing.Media = msg.GetMedia()
 		if item, ok := w.messageRows[existing.GetId()]; ok {
 			w.bindMessageRow(item, existing)
 		}
@@ -475,6 +520,22 @@ func (w *window) setupMessageList() {
 		sender.AddCSSClass("zchat-sender")
 		bubble.Append(sender)
 
+		// Attachment area: an optional preview above an open/download button.
+		media := gtk.NewBox(gtk.OrientationVertical, 4)
+		media.SetVisible(false)
+
+		preview := gtk.NewPicture()
+		preview.SetSizeRequest(240, 180)
+		preview.SetContentFit(gtk.ContentFitCover)
+		preview.AddCSSClass("zchat-media")
+		media.Append(preview)
+
+		action := gtk.NewButtonWithLabel("")
+		action.SetHAlign(gtk.AlignStart)
+		media.Append(action)
+
+		bubble.Append(media)
+
 		body := gtk.NewLabel("")
 		body.SetXAlign(0)
 		body.SetWrap(true)
@@ -516,8 +577,11 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 	outer := item.Child().(*gtk.Box)
 	bubble := outer.FirstChild().(*gtk.Box)
 	sender := bubble.FirstChild().(*gtk.Label)
-	body := sender.NextSibling().(*gtk.Label)
+	media := sender.NextSibling().(*gtk.Box)
+	body := media.NextSibling().(*gtk.Label)
 	meta := body.NextSibling().(*gtk.Label)
+
+	w.bindMedia(media, msg)
 
 	body.SetText(msg.GetBody())
 
@@ -550,6 +614,113 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 	} else {
 		meta.SetText(stamp)
 	}
+}
+
+// bindMedia renders a message's attachment: the WhatsApp thumbnail (or the
+// downloaded file itself) plus a button that downloads on demand and opens the
+// result with the desktop's default handler.
+func (w *window) bindMedia(media *gtk.Box, msg *zchatv1.Message) {
+	info := msg.GetMedia()
+	preview := media.FirstChild().(*gtk.Picture)
+	action := preview.NextSibling().(*gtk.Button)
+
+	// Rows are recycled, so the previous message's click handler must go.
+	if handle, ok := w.mediaHandlers[action]; ok {
+		action.HandlerDisconnect(handle)
+		delete(w.mediaHandlers, action)
+	}
+
+	if info == nil {
+		media.SetVisible(false)
+		return
+	}
+	media.SetVisible(true)
+
+	local := info.GetPath()
+	switch {
+	case local != "" && isVisualMedia(msg.GetType()):
+		preview.SetFilename(local)
+		preview.SetVisible(true)
+	case len(info.GetThumbnail()) > 0:
+		if pixbuf, err := pixbufFromBytes(w.ctx, info.GetThumbnail()); err == nil {
+			preview.SetPixbuf(pixbuf)
+			preview.SetVisible(true)
+		} else {
+			preview.SetVisible(false)
+		}
+	default:
+		preview.SetVisible(false)
+	}
+
+	id := msg.GetId()
+	if local != "" {
+		action.SetLabel("Open")
+		w.mediaHandlers[action] = action.ConnectClicked(func() { w.openFile(local) })
+		return
+	}
+
+	action.SetLabel(downloadLabel(msg.GetType(), info.GetSize()))
+	w.mediaHandlers[action] = action.ConnectClicked(func() {
+		action.SetSensitive(false)
+		action.SetLabel("Downloading…")
+		w.client.DownloadMedia(w.ctx, id, func(updated *zchatv1.Message, err error) {
+			action.SetSensitive(true)
+			if err != nil {
+				w.log.Error().Err(err).Str("id", id).Msg("download media")
+				w.toast("Download failed")
+				action.SetLabel("Retry download")
+				return
+			}
+			w.onMessage(updated, true)
+		})
+	})
+}
+
+func (w *window) openFile(path string) {
+	launcher := gtk.NewFileLauncher(gio.NewFileForPath(path))
+	launcher.Launch(w.ctx, &w.win.Window, nil)
+}
+
+func isVisualMedia(kind string) bool {
+	return kind == "image" || kind == "sticker"
+}
+
+func pixbufFromBytes(ctx context.Context, data []byte) (*gdkpixbuf.Pixbuf, error) {
+	stream := gio.NewMemoryInputStreamFromBytes(glib.NewBytes(data))
+	return gdkpixbuf.NewPixbufFromStream(ctx, stream)
+}
+
+func downloadLabel(kind string, size int64) string {
+	noun := "file"
+	switch kind {
+	case "image":
+		noun = "photo"
+	case "video":
+		noun = "video"
+	case "audio":
+		noun = "audio"
+	case "sticker":
+		noun = "sticker"
+	case "document":
+		noun = "document"
+	}
+	if size <= 0 {
+		return "Download " + noun
+	}
+	return fmt.Sprintf("Download %s (%s)", noun, humanSize(size))
+}
+
+func humanSize(size int64) string {
+	const unit = 1024
+	if size < unit {
+		return fmt.Sprintf("%d B", size)
+	}
+	div, exp := int64(unit), 0
+	for n := size / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGT"[exp])
 }
 
 func (w *window) setComposerEnabled(enabled bool) {

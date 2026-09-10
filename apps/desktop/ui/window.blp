@@ -44,10 +44,15 @@ Adw.ApplicationWindow window {
 
               [top]
               Gtk.Box {
-                orientation: horizontal;
+                orientation: vertical;
+                spacing: 6;
                 margin-start: 6;
                 margin-end: 6;
                 margin-bottom: 6;
+
+                Gtk.SearchEntry search_entry {
+                  placeholder-text: "Search chats";
+                }
 
                 Adw.ToggleGroup chat_filter {
                   hexpand: true;

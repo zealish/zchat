@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -52,6 +53,50 @@ func (s *Service) GetChats(ctx context.Context, req *zchatv1.GetChatsRequest) (*
 		resp.Chats = append(resp.Chats, wa.ToProtoChat(c))
 	}
 	return resp, nil
+}
+
+// SearchChats returns chats matching a free-text query.
+func (s *Service) SearchChats(ctx context.Context, req *zchatv1.SearchChatsRequest) (*zchatv1.SearchChatsResponse, error) {
+	query := strings.TrimSpace(req.GetQuery())
+	if query == "" {
+		return &zchatv1.SearchChatsResponse{}, nil
+	}
+
+	limit := int(req.GetLimit())
+	if limit <= 0 || limit > maxPageSize {
+		limit = maxPageSize
+	}
+
+	chats, err := s.store.SearchChats(ctx, query, limit)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	resp := &zchatv1.SearchChatsResponse{Chats: make([]*zchatv1.Chat, 0, len(chats))}
+	for _, c := range chats {
+		resp.Chats = append(resp.Chats, wa.ToProtoChat(c))
+	}
+	return resp, nil
+}
+
+// DownloadMedia fetches a message's attachment to the local media directory.
+func (s *Service) DownloadMedia(ctx context.Context, req *zchatv1.DownloadMediaRequest) (*zchatv1.DownloadMediaResponse, error) {
+	id := req.GetMessageId()
+	if id == "" {
+		return nil, status.Error(codes.InvalidArgument, "message_id is required")
+	}
+
+	msg, err := s.session.DownloadMedia(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "message has no media")
+		}
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+
+	// Other windows should see the now-local path too.
+	s.broker.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: msg}})
+	return &zchatv1.DownloadMediaResponse{Message: msg}, nil
 }
 
 // GetMessages returns a page of messages and marks the chat as read.

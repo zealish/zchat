@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -44,7 +45,7 @@ type Chat struct {
 	IsGroup     bool
 }
 
-// Message is a single text message row.
+// Message is a single message row. Media is nil for plain text.
 type Message struct {
 	ID         string
 	ChatJID    string
@@ -55,6 +56,24 @@ type Message struct {
 	Timestamp  int64
 	Outgoing   bool
 	Status     string
+	Media      *Media
+}
+
+// Media is an attachment belonging to a message. Payload holds the serialised
+// waE2E.Message so the daemon can decrypt the file on demand long after the
+// event was received.
+type Media struct {
+	MessageID string
+	Path      string
+	Mime      string
+	Size      int64
+	Filename  string
+	Caption   string
+	Thumbnail []byte
+	Width     int32
+	Height    int32
+	Duration  int32
+	Payload   []byte
 }
 
 // Store owns the database handle shared with whatsmeow's session store.
@@ -89,7 +108,14 @@ CREATE TABLE IF NOT EXISTS media (
     message_id TEXT,
     path TEXT,
     mime TEXT,
-    size INTEGER
+    size INTEGER,
+    filename TEXT,
+    caption TEXT,
+    thumbnail BLOB,
+    width INTEGER,
+    height INTEGER,
+    duration INTEGER,
+    payload BLOB
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat_jid ON messages(chat_jid);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
@@ -111,7 +137,55 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrateMedia(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// mediaColumns are the v0.2 additions to the v0.1 media table. Databases
+// created before v0.2 already have the table, so CREATE TABLE IF NOT EXISTS
+// alone would leave them without these columns.
+var mediaColumns = []struct{ name, decl string }{
+	{"filename", "TEXT"},
+	{"caption", "TEXT"},
+	{"thumbnail", "BLOB"},
+	{"width", "INTEGER"},
+	{"height", "INTEGER"},
+	{"duration", "INTEGER"},
+	{"payload", "BLOB"},
+}
+
+func migrateMedia(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info('media')`)
+	if err != nil {
+		return fmt.Errorf("inspect media table: %w", err)
+	}
+	defer rows.Close()
+
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("scan media column: %w", err)
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, col := range mediaColumns {
+		if existing[col.name] {
+			continue
+		}
+		// Column names come from the fixed list above, never from user input.
+		if _, err := db.ExecContext(ctx, `ALTER TABLE media ADD COLUMN `+col.name+` `+col.decl); err != nil {
+			return fmt.Errorf("add media column %s: %w", col.name, err)
+		}
+	}
+	return nil
 }
 
 // DB exposes the handle so whatsmeow's sqlstore can share it.
@@ -271,15 +345,47 @@ func (s *Store) ClearUnread(ctx context.Context, jid string) error {
 	return nil
 }
 
-// InsertMessage stores a message, ignoring replays from history sync.
+// InsertMessage stores a message and its attachment, ignoring replays from
+// history sync.
 func (s *Store) InsertMessage(ctx context.Context, m Message) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin insert %s: %w", m.ID, err)
+	}
+	defer tx.Rollback()
+
+	if err := insertMessageTx(ctx, tx, m); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+const insertMessageSQL = `
 INSERT INTO messages (id, chat_jid, sender, sender_name, body, type, timestamp, outgoing, status)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(id) DO NOTHING`,
-		m.ID, m.ChatJID, m.Sender, m.SenderName, m.Body, m.Type, m.Timestamp, m.Outgoing, m.Status)
-	if err != nil {
+ON CONFLICT(id) DO NOTHING`
+
+const insertMediaSQL = `
+INSERT INTO media (id, message_id, path, mime, size, filename, caption, thumbnail, width, height, duration, payload)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO NOTHING`
+
+func insertMessageTx(ctx context.Context, ex execer, m Message) error {
+	if _, err := ex.ExecContext(ctx, insertMessageSQL,
+		m.ID, m.ChatJID, m.Sender, m.SenderName, m.Body, m.Type, m.Timestamp, m.Outgoing, m.Status); err != nil {
 		return fmt.Errorf("insert message %s: %w", m.ID, err)
+	}
+	if m.Media == nil {
+		return nil
+	}
+	if _, err := ex.ExecContext(ctx, insertMediaSQL,
+		m.ID, m.ID, m.Media.Path, m.Media.Mime, m.Media.Size, m.Media.Filename, m.Media.Caption,
+		m.Media.Thumbnail, m.Media.Width, m.Media.Height, m.Media.Duration, m.Media.Payload); err != nil {
+		return fmt.Errorf("insert media %s: %w", m.ID, err)
 	}
 	return nil
 }
@@ -297,32 +403,49 @@ func (s *Store) InsertMessages(ctx context.Context, msgs []Message) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO messages (id, chat_jid, sender, sender_name, body, type, timestamp, outgoing, status)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(id) DO NOTHING`)
-	if err != nil {
-		return fmt.Errorf("prepare batch insert: %w", err)
-	}
-	defer stmt.Close()
-
 	for _, m := range msgs {
-		if _, err := stmt.ExecContext(ctx, m.ID, m.ChatJID, m.Sender, m.SenderName, m.Body, m.Type, m.Timestamp, m.Outgoing, m.Status); err != nil {
-			return fmt.Errorf("insert message %s: %w", m.ID, err)
+		if err := insertMessageTx(ctx, tx, m); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
 }
 
+// messageColumns selects a message with its optional attachment.
+const messageColumns = `
+SELECT m.id, m.chat_jid, COALESCE(m.sender, ''), COALESCE(m.sender_name, ''), COALESCE(m.body, ''),
+       COALESCE(m.type, ''), COALESCE(m.timestamp, 0), m.outgoing, COALESCE(m.status, ''),
+       md.id IS NOT NULL, COALESCE(md.path, ''), COALESCE(md.mime, ''), COALESCE(md.size, 0),
+       COALESCE(md.filename, ''), COALESCE(md.caption, ''), md.thumbnail,
+       COALESCE(md.width, 0), COALESCE(md.height, 0), COALESCE(md.duration, 0)
+FROM messages m LEFT JOIN media md ON md.id = m.id`
+
+// scanMessage reads one row shaped by messageColumns.
+func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
+	var (
+		m        Message
+		md       Media
+		hasMedia bool
+	)
+	err := sc.Scan(&m.ID, &m.ChatJID, &m.Sender, &m.SenderName, &m.Body, &m.Type, &m.Timestamp,
+		&m.Outgoing, &m.Status, &hasMedia, &md.Path, &md.Mime, &md.Size, &md.Filename,
+		&md.Caption, &md.Thumbnail, &md.Width, &md.Height, &md.Duration)
+	if err != nil {
+		return Message{}, err
+	}
+	if hasMedia {
+		md.MessageID = m.ID
+		m.Media = &md
+	}
+	return m, nil
+}
+
 // ListMessages returns messages in chronological order, newest page first when
 // before is non-zero.
 func (s *Store) ListMessages(ctx context.Context, chatJID string, limit int, before int64) ([]Message, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT id, chat_jid, COALESCE(sender, ''), COALESCE(sender_name, ''), COALESCE(body, ''),
-       COALESCE(type, ''), COALESCE(timestamp, 0), outgoing, COALESCE(status, '')
-FROM messages
-WHERE chat_jid = ? AND (? = 0 OR timestamp < ?)
-ORDER BY timestamp DESC
+	rows, err := s.db.QueryContext(ctx, messageColumns+`
+WHERE m.chat_jid = ? AND (? = 0 OR m.timestamp < ?)
+ORDER BY m.timestamp DESC
 LIMIT ?`, chatJID, before, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list messages %s: %w", chatJID, err)
@@ -331,8 +454,8 @@ LIMIT ?`, chatJID, before, before, limit)
 
 	var msgs []Message
 	for rows.Next() {
-		var m Message
-		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Sender, &m.SenderName, &m.Body, &m.Type, &m.Timestamp, &m.Outgoing, &m.Status); err != nil {
+		m, err := scanMessage(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		msgs = append(msgs, m)
@@ -349,12 +472,7 @@ LIMIT ?`, chatJID, before, before, limit)
 
 // GetMessage loads a single message.
 func (s *Store) GetMessage(ctx context.Context, id string) (Message, error) {
-	var m Message
-	err := s.db.QueryRowContext(ctx, `
-SELECT id, chat_jid, COALESCE(sender, ''), COALESCE(sender_name, ''), COALESCE(body, ''),
-       COALESCE(type, ''), COALESCE(timestamp, 0), outgoing, COALESCE(status, '')
-FROM messages WHERE id = ?`, id).
-		Scan(&m.ID, &m.ChatJID, &m.Sender, &m.SenderName, &m.Body, &m.Type, &m.Timestamp, &m.Outgoing, &m.Status)
+	m, err := scanMessage(s.db.QueryRowContext(ctx, messageColumns+` WHERE m.id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound
 	}
@@ -362,6 +480,64 @@ FROM messages WHERE id = ?`, id).
 		return Message{}, fmt.Errorf("get message %s: %w", id, err)
 	}
 	return m, nil
+}
+
+// MediaPayload returns the stored waE2E payload needed to decrypt a message's
+// attachment, plus the local path when it was already downloaded.
+func (s *Store) MediaPayload(ctx context.Context, messageID string) (payload []byte, path string, err error) {
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(payload, X''), COALESCE(path, '') FROM media WHERE id = ?`, messageID).
+		Scan(&payload, &path)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("read media payload %s: %w", messageID, err)
+	}
+	return payload, path, nil
+}
+
+// SetMediaPath records where a downloaded attachment landed on disk.
+func (s *Store) SetMediaPath(ctx context.Context, messageID, path string, size int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE media SET path = ?, size = CASE WHEN ? > 0 THEN ? ELSE size END WHERE id = ?`,
+		path, size, size, messageID)
+	if err != nil {
+		return fmt.Errorf("set media path %s: %w", messageID, err)
+	}
+	return nil
+}
+
+// SearchChats returns chats whose name or last message matches query.
+func (s *Store) SearchChats(ctx context.Context, query string, limit int) ([]Chat, error) {
+	// LIKE with an escaped pattern keeps the caller's wildcards literal.
+	pattern := "%" + escapeLike(query) + "%"
+	rows, err := s.db.QueryContext(ctx, `
+SELECT jid, name, unread, archived, pinned, COALESCE(last_message, ''), COALESCE(updated_at, 0), is_group
+FROM chats
+WHERE (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@c.us' OR jid LIKE '%@lid' OR jid LIKE '%@g.us')
+  AND (name LIKE ? ESCAPE '\' OR COALESCE(last_message, '') LIKE ? ESCAPE '\')
+ORDER BY pinned DESC, updated_at DESC
+LIMIT ?`, pattern, pattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search chats: %w", err)
+	}
+	defer rows.Close()
+
+	var chats []Chat
+	for rows.Next() {
+		var c Chat
+		if err := rows.Scan(&c.JID, &c.Name, &c.Unread, &c.Archived, &c.Pinned, &c.LastMessage, &c.UpdatedAt, &c.IsGroup); err != nil {
+			return nil, fmt.Errorf("scan chat: %w", err)
+		}
+		chats = append(chats, c)
+	}
+	return chats, rows.Err()
+}
+
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }
 
 // UpdateMessageStatus advances a message's delivery status. Statuses never move

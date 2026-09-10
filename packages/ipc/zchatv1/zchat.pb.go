@@ -241,10 +241,11 @@ type Message struct {
 	Sender        string                 `protobuf:"bytes,3,opt,name=sender,proto3" json:"sender,omitempty"`
 	SenderName    string                 `protobuf:"bytes,4,opt,name=sender_name,json=senderName,proto3" json:"sender_name,omitempty"`
 	Body          string                 `protobuf:"bytes,5,opt,name=body,proto3" json:"body,omitempty"`
-	Type          string                 `protobuf:"bytes,6,opt,name=type,proto3" json:"type,omitempty"`            // "text" for v0.1; other values reserved for v0.2 media
+	Type          string                 `protobuf:"bytes,6,opt,name=type,proto3" json:"type,omitempty"`            // "text", "image", "video", "audio", "document", "sticker"
 	Timestamp     int64                  `protobuf:"varint,7,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // unix seconds
 	Outgoing      bool                   `protobuf:"varint,8,opt,name=outgoing,proto3" json:"outgoing,omitempty"`
 	Status        MessageStatus          `protobuf:"varint,9,opt,name=status,proto3,enum=zchat.v1.MessageStatus" json:"status,omitempty"`
+	Media         *MediaInfo             `protobuf:"bytes,10,opt,name=media,proto3" json:"media,omitempty"` // set when type != "text"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -342,6 +343,123 @@ func (x *Message) GetStatus() MessageStatus {
 	return MessageStatus_MESSAGE_STATUS_UNSPECIFIED
 }
 
+func (x *Message) GetMedia() *MediaInfo {
+	if x != nil {
+		return x.Media
+	}
+	return nil
+}
+
+// MediaInfo describes an attachment. path is empty until the media has been
+// downloaded; clients call DownloadMedia to materialise it.
+type MediaInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mime          string                 `protobuf:"bytes,1,opt,name=mime,proto3" json:"mime,omitempty"`
+	Size          int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
+	Filename      string                 `protobuf:"bytes,3,opt,name=filename,proto3" json:"filename,omitempty"`
+	Caption       string                 `protobuf:"bytes,4,opt,name=caption,proto3" json:"caption,omitempty"`
+	Path          string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`           // local file path, empty when not downloaded yet
+	Thumbnail     []byte                 `protobuf:"bytes,6,opt,name=thumbnail,proto3" json:"thumbnail,omitempty"` // JPEG preview embedded by WhatsApp, may be empty
+	Width         int32                  `protobuf:"varint,7,opt,name=width,proto3" json:"width,omitempty"`
+	Height        int32                  `protobuf:"varint,8,opt,name=height,proto3" json:"height,omitempty"`
+	Duration      int32                  `protobuf:"varint,9,opt,name=duration,proto3" json:"duration,omitempty"` // seconds, audio and video only
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MediaInfo) Reset() {
+	*x = MediaInfo{}
+	mi := &file_zchat_v1_zchat_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MediaInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MediaInfo) ProtoMessage() {}
+
+func (x *MediaInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_zchat_v1_zchat_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MediaInfo.ProtoReflect.Descriptor instead.
+func (*MediaInfo) Descriptor() ([]byte, []int) {
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *MediaInfo) GetMime() string {
+	if x != nil {
+		return x.Mime
+	}
+	return ""
+}
+
+func (x *MediaInfo) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *MediaInfo) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *MediaInfo) GetCaption() string {
+	if x != nil {
+		return x.Caption
+	}
+	return ""
+}
+
+func (x *MediaInfo) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *MediaInfo) GetThumbnail() []byte {
+	if x != nil {
+		return x.Thumbnail
+	}
+	return nil
+}
+
+func (x *MediaInfo) GetWidth() int32 {
+	if x != nil {
+		return x.Width
+	}
+	return 0
+}
+
+func (x *MediaInfo) GetHeight() int32 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+func (x *MediaInfo) GetDuration() int32 {
+	if x != nil {
+		return x.Duration
+	}
+	return 0
+}
+
 type ConnectionState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        ConnectionStatus       `protobuf:"varint,1,opt,name=status,proto3,enum=zchat.v1.ConnectionStatus" json:"status,omitempty"`
@@ -354,7 +472,7 @@ type ConnectionState struct {
 
 func (x *ConnectionState) Reset() {
 	*x = ConnectionState{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[2]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -366,7 +484,7 @@ func (x *ConnectionState) String() string {
 func (*ConnectionState) ProtoMessage() {}
 
 func (x *ConnectionState) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[2]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -379,7 +497,7 @@ func (x *ConnectionState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionState.ProtoReflect.Descriptor instead.
 func (*ConnectionState) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{2}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ConnectionState) GetStatus() ConnectionStatus {
@@ -420,7 +538,7 @@ type GetChatsRequest struct {
 
 func (x *GetChatsRequest) Reset() {
 	*x = GetChatsRequest{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[3]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -432,7 +550,7 @@ func (x *GetChatsRequest) String() string {
 func (*GetChatsRequest) ProtoMessage() {}
 
 func (x *GetChatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[3]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -445,7 +563,7 @@ func (x *GetChatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetChatsRequest.ProtoReflect.Descriptor instead.
 func (*GetChatsRequest) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{3}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetChatsRequest) GetLimit() int32 {
@@ -471,7 +589,7 @@ type GetChatsResponse struct {
 
 func (x *GetChatsResponse) Reset() {
 	*x = GetChatsResponse{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[4]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -483,7 +601,7 @@ func (x *GetChatsResponse) String() string {
 func (*GetChatsResponse) ProtoMessage() {}
 
 func (x *GetChatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[4]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -496,7 +614,7 @@ func (x *GetChatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetChatsResponse.ProtoReflect.Descriptor instead.
 func (*GetChatsResponse) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{4}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetChatsResponse) GetChats() []*Chat {
@@ -517,7 +635,7 @@ type GetMessagesRequest struct {
 
 func (x *GetMessagesRequest) Reset() {
 	*x = GetMessagesRequest{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[5]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -529,7 +647,7 @@ func (x *GetMessagesRequest) String() string {
 func (*GetMessagesRequest) ProtoMessage() {}
 
 func (x *GetMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[5]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -542,7 +660,7 @@ func (x *GetMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMessagesRequest.ProtoReflect.Descriptor instead.
 func (*GetMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{5}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetMessagesRequest) GetChatJid() string {
@@ -575,7 +693,7 @@ type GetMessagesResponse struct {
 
 func (x *GetMessagesResponse) Reset() {
 	*x = GetMessagesResponse{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[6]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -587,7 +705,7 @@ func (x *GetMessagesResponse) String() string {
 func (*GetMessagesResponse) ProtoMessage() {}
 
 func (x *GetMessagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[6]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -600,7 +718,7 @@ func (x *GetMessagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMessagesResponse.ProtoReflect.Descriptor instead.
 func (*GetMessagesResponse) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{6}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetMessagesResponse) GetMessages() []*Message {
@@ -620,7 +738,7 @@ type SendMessageRequest struct {
 
 func (x *SendMessageRequest) Reset() {
 	*x = SendMessageRequest{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[7]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -632,7 +750,7 @@ func (x *SendMessageRequest) String() string {
 func (*SendMessageRequest) ProtoMessage() {}
 
 func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[7]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -645,7 +763,7 @@ func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageRequest.ProtoReflect.Descriptor instead.
 func (*SendMessageRequest) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{7}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SendMessageRequest) GetChatJid() string {
@@ -671,7 +789,7 @@ type SendMessageResponse struct {
 
 func (x *SendMessageResponse) Reset() {
 	*x = SendMessageResponse{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[8]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -683,7 +801,7 @@ func (x *SendMessageResponse) String() string {
 func (*SendMessageResponse) ProtoMessage() {}
 
 func (x *SendMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[8]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -696,7 +814,7 @@ func (x *SendMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageResponse.ProtoReflect.Descriptor instead.
 func (*SendMessageResponse) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{8}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SendMessageResponse) GetMessage() *Message {
@@ -714,7 +832,7 @@ type GetConnectionStateRequest struct {
 
 func (x *GetConnectionStateRequest) Reset() {
 	*x = GetConnectionStateRequest{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[9]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -726,7 +844,7 @@ func (x *GetConnectionStateRequest) String() string {
 func (*GetConnectionStateRequest) ProtoMessage() {}
 
 func (x *GetConnectionStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[9]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -739,7 +857,7 @@ func (x *GetConnectionStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConnectionStateRequest.ProtoReflect.Descriptor instead.
 func (*GetConnectionStateRequest) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{9}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{10}
 }
 
 type LogoutRequest struct {
@@ -750,7 +868,7 @@ type LogoutRequest struct {
 
 func (x *LogoutRequest) Reset() {
 	*x = LogoutRequest{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[10]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +880,7 @@ func (x *LogoutRequest) String() string {
 func (*LogoutRequest) ProtoMessage() {}
 
 func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[10]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +893,7 @@ func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogoutRequest.ProtoReflect.Descriptor instead.
 func (*LogoutRequest) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{10}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{11}
 }
 
 type LogoutResponse struct {
@@ -786,7 +904,7 @@ type LogoutResponse struct {
 
 func (x *LogoutResponse) Reset() {
 	*x = LogoutResponse{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[11]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -798,7 +916,7 @@ func (x *LogoutResponse) String() string {
 func (*LogoutResponse) ProtoMessage() {}
 
 func (x *LogoutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[11]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -811,7 +929,191 @@ func (x *LogoutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogoutResponse.ProtoReflect.Descriptor instead.
 func (*LogoutResponse) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{11}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{12}
+}
+
+type DownloadMediaRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadMediaRequest) Reset() {
+	*x = DownloadMediaRequest{}
+	mi := &file_zchat_v1_zchat_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadMediaRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadMediaRequest) ProtoMessage() {}
+
+func (x *DownloadMediaRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_zchat_v1_zchat_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadMediaRequest.ProtoReflect.Descriptor instead.
+func (*DownloadMediaRequest) Descriptor() ([]byte, []int) {
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *DownloadMediaRequest) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+type DownloadMediaResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadMediaResponse) Reset() {
+	*x = DownloadMediaResponse{}
+	mi := &file_zchat_v1_zchat_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadMediaResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadMediaResponse) ProtoMessage() {}
+
+func (x *DownloadMediaResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zchat_v1_zchat_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadMediaResponse.ProtoReflect.Descriptor instead.
+func (*DownloadMediaResponse) Descriptor() ([]byte, []int) {
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *DownloadMediaResponse) GetMessage() *Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+type SearchChatsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchChatsRequest) Reset() {
+	*x = SearchChatsRequest{}
+	mi := &file_zchat_v1_zchat_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchChatsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchChatsRequest) ProtoMessage() {}
+
+func (x *SearchChatsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_zchat_v1_zchat_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchChatsRequest.ProtoReflect.Descriptor instead.
+func (*SearchChatsRequest) Descriptor() ([]byte, []int) {
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *SearchChatsRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *SearchChatsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type SearchChatsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Chats         []*Chat                `protobuf:"bytes,1,rep,name=chats,proto3" json:"chats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchChatsResponse) Reset() {
+	*x = SearchChatsResponse{}
+	mi := &file_zchat_v1_zchat_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchChatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchChatsResponse) ProtoMessage() {}
+
+func (x *SearchChatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zchat_v1_zchat_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchChatsResponse.ProtoReflect.Descriptor instead.
+func (*SearchChatsResponse) Descriptor() ([]byte, []int) {
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SearchChatsResponse) GetChats() []*Chat {
+	if x != nil {
+		return x.Chats
+	}
+	return nil
 }
 
 type StreamEventsRequest struct {
@@ -822,7 +1124,7 @@ type StreamEventsRequest struct {
 
 func (x *StreamEventsRequest) Reset() {
 	*x = StreamEventsRequest{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[12]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -834,7 +1136,7 @@ func (x *StreamEventsRequest) String() string {
 func (*StreamEventsRequest) ProtoMessage() {}
 
 func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[12]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -847,7 +1149,7 @@ func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEventsRequest.ProtoReflect.Descriptor instead.
 func (*StreamEventsRequest) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{12}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{17}
 }
 
 type QRUpdate struct {
@@ -860,7 +1162,7 @@ type QRUpdate struct {
 
 func (x *QRUpdate) Reset() {
 	*x = QRUpdate{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[13]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -872,7 +1174,7 @@ func (x *QRUpdate) String() string {
 func (*QRUpdate) ProtoMessage() {}
 
 func (x *QRUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[13]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -885,7 +1187,7 @@ func (x *QRUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QRUpdate.ProtoReflect.Descriptor instead.
 func (*QRUpdate) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{13}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *QRUpdate) GetCode() string {
@@ -918,7 +1220,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[14]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -930,7 +1232,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[14]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -943,7 +1245,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{14}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *Event) GetPayload() isEvent_Payload {
@@ -1046,7 +1348,7 @@ const file_zchat_v1_zchat_proto_rawDesc = "" +
 	"\flast_message\x18\x06 \x01(\tR\vlastMessage\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\a \x01(\x03R\tupdatedAt\x12\x19\n" +
-	"\bis_group\x18\b \x01(\bR\aisGroup\"\x80\x02\n" +
+	"\bis_group\x18\b \x01(\bR\aisGroup\"\xab\x02\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bchat_jid\x18\x02 \x01(\tR\achatJid\x12\x16\n" +
@@ -1057,7 +1359,19 @@ const file_zchat_v1_zchat_proto_rawDesc = "" +
 	"\x04type\x18\x06 \x01(\tR\x04type\x12\x1c\n" +
 	"\ttimestamp\x18\a \x01(\x03R\ttimestamp\x12\x1a\n" +
 	"\boutgoing\x18\b \x01(\bR\boutgoing\x12/\n" +
-	"\x06status\x18\t \x01(\x0e2\x17.zchat.v1.MessageStatusR\x06status\"\x91\x01\n" +
+	"\x06status\x18\t \x01(\x0e2\x17.zchat.v1.MessageStatusR\x06status\x12)\n" +
+	"\x05media\x18\n" +
+	" \x01(\v2\x13.zchat.v1.MediaInfoR\x05media\"\xe5\x01\n" +
+	"\tMediaInfo\x12\x12\n" +
+	"\x04mime\x18\x01 \x01(\tR\x04mime\x12\x12\n" +
+	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x1a\n" +
+	"\bfilename\x18\x03 \x01(\tR\bfilename\x12\x18\n" +
+	"\acaption\x18\x04 \x01(\tR\acaption\x12\x12\n" +
+	"\x04path\x18\x05 \x01(\tR\x04path\x12\x1c\n" +
+	"\tthumbnail\x18\x06 \x01(\fR\tthumbnail\x12\x14\n" +
+	"\x05width\x18\a \x01(\x05R\x05width\x12\x16\n" +
+	"\x06height\x18\b \x01(\x05R\x06height\x12\x1a\n" +
+	"\bduration\x18\t \x01(\x05R\bduration\"\x91\x01\n" +
 	"\x0fConnectionState\x122\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x1a.zchat.v1.ConnectionStatusR\x06status\x12\x17\n" +
 	"\aown_jid\x18\x02 \x01(\tR\x06ownJid\x12\x1b\n" +
@@ -1081,7 +1395,17 @@ const file_zchat_v1_zchat_proto_rawDesc = "" +
 	"\amessage\x18\x01 \x01(\v2\x11.zchat.v1.MessageR\amessage\"\x1b\n" +
 	"\x19GetConnectionStateRequest\"\x0f\n" +
 	"\rLogoutRequest\"\x10\n" +
-	"\x0eLogoutResponse\"\x15\n" +
+	"\x0eLogoutResponse\"5\n" +
+	"\x14DownloadMediaRequest\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\"D\n" +
+	"\x15DownloadMediaResponse\x12+\n" +
+	"\amessage\x18\x01 \x01(\v2\x11.zchat.v1.MessageR\amessage\"@\n" +
+	"\x12SearchChatsRequest\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\";\n" +
+	"\x13SearchChatsResponse\x12$\n" +
+	"\x05chats\x18\x01 \x03(\v2\x0e.zchat.v1.ChatR\x05chats\"\x15\n" +
 	"\x13StreamEventsRequest\"=\n" +
 	"\bQRUpdate\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x1d\n" +
@@ -1107,13 +1431,15 @@ const file_zchat_v1_zchat_proto_rawDesc = "" +
 	"\x1eCONNECTION_STATUS_DISCONNECTED\x10\x01\x12 \n" +
 	"\x1cCONNECTION_STATUS_CONNECTING\x10\x02\x12\x1f\n" +
 	"\x1bCONNECTION_STATUS_CONNECTED\x10\x03\x12 \n" +
-	"\x1cCONNECTION_STATUS_LOGGED_OUT\x10\x042\xbd\x03\n" +
+	"\x1cCONNECTION_STATUS_LOGGED_OUT\x10\x042\xdb\x04\n" +
 	"\vChatService\x12A\n" +
 	"\bGetChats\x12\x19.zchat.v1.GetChatsRequest\x1a\x1a.zchat.v1.GetChatsResponse\x12J\n" +
 	"\vGetMessages\x12\x1c.zchat.v1.GetMessagesRequest\x1a\x1d.zchat.v1.GetMessagesResponse\x12J\n" +
 	"\vSendMessage\x12\x1c.zchat.v1.SendMessageRequest\x1a\x1d.zchat.v1.SendMessageResponse\x12T\n" +
 	"\x12GetConnectionState\x12#.zchat.v1.GetConnectionStateRequest\x1a\x19.zchat.v1.ConnectionState\x12;\n" +
-	"\x06Logout\x12\x17.zchat.v1.LogoutRequest\x1a\x18.zchat.v1.LogoutResponse\x12@\n" +
+	"\x06Logout\x12\x17.zchat.v1.LogoutRequest\x1a\x18.zchat.v1.LogoutResponse\x12P\n" +
+	"\rDownloadMedia\x12\x1e.zchat.v1.DownloadMediaRequest\x1a\x1f.zchat.v1.DownloadMediaResponse\x12J\n" +
+	"\vSearchChats\x12\x1c.zchat.v1.SearchChatsRequest\x1a\x1d.zchat.v1.SearchChatsResponse\x12@\n" +
 	"\fStreamEvents\x12\x1d.zchat.v1.StreamEventsRequest\x1a\x0f.zchat.v1.Event0\x01B7Z5github.com/zealish/zchat/packages/ipc/zchatv1;zchatv1b\x06proto3"
 
 var (
@@ -1129,54 +1455,66 @@ func file_zchat_v1_zchat_proto_rawDescGZIP() []byte {
 }
 
 var file_zchat_v1_zchat_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_zchat_v1_zchat_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_zchat_v1_zchat_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_zchat_v1_zchat_proto_goTypes = []any{
 	(MessageStatus)(0),                // 0: zchat.v1.MessageStatus
 	(ConnectionStatus)(0),             // 1: zchat.v1.ConnectionStatus
 	(*Chat)(nil),                      // 2: zchat.v1.Chat
 	(*Message)(nil),                   // 3: zchat.v1.Message
-	(*ConnectionState)(nil),           // 4: zchat.v1.ConnectionState
-	(*GetChatsRequest)(nil),           // 5: zchat.v1.GetChatsRequest
-	(*GetChatsResponse)(nil),          // 6: zchat.v1.GetChatsResponse
-	(*GetMessagesRequest)(nil),        // 7: zchat.v1.GetMessagesRequest
-	(*GetMessagesResponse)(nil),       // 8: zchat.v1.GetMessagesResponse
-	(*SendMessageRequest)(nil),        // 9: zchat.v1.SendMessageRequest
-	(*SendMessageResponse)(nil),       // 10: zchat.v1.SendMessageResponse
-	(*GetConnectionStateRequest)(nil), // 11: zchat.v1.GetConnectionStateRequest
-	(*LogoutRequest)(nil),             // 12: zchat.v1.LogoutRequest
-	(*LogoutResponse)(nil),            // 13: zchat.v1.LogoutResponse
-	(*StreamEventsRequest)(nil),       // 14: zchat.v1.StreamEventsRequest
-	(*QRUpdate)(nil),                  // 15: zchat.v1.QRUpdate
-	(*Event)(nil),                     // 16: zchat.v1.Event
+	(*MediaInfo)(nil),                 // 4: zchat.v1.MediaInfo
+	(*ConnectionState)(nil),           // 5: zchat.v1.ConnectionState
+	(*GetChatsRequest)(nil),           // 6: zchat.v1.GetChatsRequest
+	(*GetChatsResponse)(nil),          // 7: zchat.v1.GetChatsResponse
+	(*GetMessagesRequest)(nil),        // 8: zchat.v1.GetMessagesRequest
+	(*GetMessagesResponse)(nil),       // 9: zchat.v1.GetMessagesResponse
+	(*SendMessageRequest)(nil),        // 10: zchat.v1.SendMessageRequest
+	(*SendMessageResponse)(nil),       // 11: zchat.v1.SendMessageResponse
+	(*GetConnectionStateRequest)(nil), // 12: zchat.v1.GetConnectionStateRequest
+	(*LogoutRequest)(nil),             // 13: zchat.v1.LogoutRequest
+	(*LogoutResponse)(nil),            // 14: zchat.v1.LogoutResponse
+	(*DownloadMediaRequest)(nil),      // 15: zchat.v1.DownloadMediaRequest
+	(*DownloadMediaResponse)(nil),     // 16: zchat.v1.DownloadMediaResponse
+	(*SearchChatsRequest)(nil),        // 17: zchat.v1.SearchChatsRequest
+	(*SearchChatsResponse)(nil),       // 18: zchat.v1.SearchChatsResponse
+	(*StreamEventsRequest)(nil),       // 19: zchat.v1.StreamEventsRequest
+	(*QRUpdate)(nil),                  // 20: zchat.v1.QRUpdate
+	(*Event)(nil),                     // 21: zchat.v1.Event
 }
 var file_zchat_v1_zchat_proto_depIdxs = []int32{
 	0,  // 0: zchat.v1.Message.status:type_name -> zchat.v1.MessageStatus
-	1,  // 1: zchat.v1.ConnectionState.status:type_name -> zchat.v1.ConnectionStatus
-	2,  // 2: zchat.v1.GetChatsResponse.chats:type_name -> zchat.v1.Chat
-	3,  // 3: zchat.v1.GetMessagesResponse.messages:type_name -> zchat.v1.Message
-	3,  // 4: zchat.v1.SendMessageResponse.message:type_name -> zchat.v1.Message
-	3,  // 5: zchat.v1.Event.message_received:type_name -> zchat.v1.Message
-	3,  // 6: zchat.v1.Event.message_updated:type_name -> zchat.v1.Message
-	2,  // 7: zchat.v1.Event.chat_updated:type_name -> zchat.v1.Chat
-	15, // 8: zchat.v1.Event.qr_updated:type_name -> zchat.v1.QRUpdate
-	4,  // 9: zchat.v1.Event.connection_state:type_name -> zchat.v1.ConnectionState
-	5,  // 10: zchat.v1.ChatService.GetChats:input_type -> zchat.v1.GetChatsRequest
-	7,  // 11: zchat.v1.ChatService.GetMessages:input_type -> zchat.v1.GetMessagesRequest
-	9,  // 12: zchat.v1.ChatService.SendMessage:input_type -> zchat.v1.SendMessageRequest
-	11, // 13: zchat.v1.ChatService.GetConnectionState:input_type -> zchat.v1.GetConnectionStateRequest
-	12, // 14: zchat.v1.ChatService.Logout:input_type -> zchat.v1.LogoutRequest
-	14, // 15: zchat.v1.ChatService.StreamEvents:input_type -> zchat.v1.StreamEventsRequest
-	6,  // 16: zchat.v1.ChatService.GetChats:output_type -> zchat.v1.GetChatsResponse
-	8,  // 17: zchat.v1.ChatService.GetMessages:output_type -> zchat.v1.GetMessagesResponse
-	10, // 18: zchat.v1.ChatService.SendMessage:output_type -> zchat.v1.SendMessageResponse
-	4,  // 19: zchat.v1.ChatService.GetConnectionState:output_type -> zchat.v1.ConnectionState
-	13, // 20: zchat.v1.ChatService.Logout:output_type -> zchat.v1.LogoutResponse
-	16, // 21: zchat.v1.ChatService.StreamEvents:output_type -> zchat.v1.Event
-	16, // [16:22] is the sub-list for method output_type
-	10, // [10:16] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	4,  // 1: zchat.v1.Message.media:type_name -> zchat.v1.MediaInfo
+	1,  // 2: zchat.v1.ConnectionState.status:type_name -> zchat.v1.ConnectionStatus
+	2,  // 3: zchat.v1.GetChatsResponse.chats:type_name -> zchat.v1.Chat
+	3,  // 4: zchat.v1.GetMessagesResponse.messages:type_name -> zchat.v1.Message
+	3,  // 5: zchat.v1.SendMessageResponse.message:type_name -> zchat.v1.Message
+	3,  // 6: zchat.v1.DownloadMediaResponse.message:type_name -> zchat.v1.Message
+	2,  // 7: zchat.v1.SearchChatsResponse.chats:type_name -> zchat.v1.Chat
+	3,  // 8: zchat.v1.Event.message_received:type_name -> zchat.v1.Message
+	3,  // 9: zchat.v1.Event.message_updated:type_name -> zchat.v1.Message
+	2,  // 10: zchat.v1.Event.chat_updated:type_name -> zchat.v1.Chat
+	20, // 11: zchat.v1.Event.qr_updated:type_name -> zchat.v1.QRUpdate
+	5,  // 12: zchat.v1.Event.connection_state:type_name -> zchat.v1.ConnectionState
+	6,  // 13: zchat.v1.ChatService.GetChats:input_type -> zchat.v1.GetChatsRequest
+	8,  // 14: zchat.v1.ChatService.GetMessages:input_type -> zchat.v1.GetMessagesRequest
+	10, // 15: zchat.v1.ChatService.SendMessage:input_type -> zchat.v1.SendMessageRequest
+	12, // 16: zchat.v1.ChatService.GetConnectionState:input_type -> zchat.v1.GetConnectionStateRequest
+	13, // 17: zchat.v1.ChatService.Logout:input_type -> zchat.v1.LogoutRequest
+	15, // 18: zchat.v1.ChatService.DownloadMedia:input_type -> zchat.v1.DownloadMediaRequest
+	17, // 19: zchat.v1.ChatService.SearchChats:input_type -> zchat.v1.SearchChatsRequest
+	19, // 20: zchat.v1.ChatService.StreamEvents:input_type -> zchat.v1.StreamEventsRequest
+	7,  // 21: zchat.v1.ChatService.GetChats:output_type -> zchat.v1.GetChatsResponse
+	9,  // 22: zchat.v1.ChatService.GetMessages:output_type -> zchat.v1.GetMessagesResponse
+	11, // 23: zchat.v1.ChatService.SendMessage:output_type -> zchat.v1.SendMessageResponse
+	5,  // 24: zchat.v1.ChatService.GetConnectionState:output_type -> zchat.v1.ConnectionState
+	14, // 25: zchat.v1.ChatService.Logout:output_type -> zchat.v1.LogoutResponse
+	16, // 26: zchat.v1.ChatService.DownloadMedia:output_type -> zchat.v1.DownloadMediaResponse
+	18, // 27: zchat.v1.ChatService.SearchChats:output_type -> zchat.v1.SearchChatsResponse
+	21, // 28: zchat.v1.ChatService.StreamEvents:output_type -> zchat.v1.Event
+	21, // [21:29] is the sub-list for method output_type
+	13, // [13:21] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_zchat_v1_zchat_proto_init() }
@@ -1184,7 +1522,7 @@ func file_zchat_v1_zchat_proto_init() {
 	if File_zchat_v1_zchat_proto != nil {
 		return
 	}
-	file_zchat_v1_zchat_proto_msgTypes[14].OneofWrappers = []any{
+	file_zchat_v1_zchat_proto_msgTypes[19].OneofWrappers = []any{
 		(*Event_MessageReceived)(nil),
 		(*Event_MessageUpdated)(nil),
 		(*Event_ChatUpdated)(nil),
@@ -1197,7 +1535,7 @@ func file_zchat_v1_zchat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zchat_v1_zchat_proto_rawDesc), len(file_zchat_v1_zchat_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   15,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

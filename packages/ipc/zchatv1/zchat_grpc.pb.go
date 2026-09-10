@@ -24,6 +24,8 @@ const (
 	ChatService_SendMessage_FullMethodName        = "/zchat.v1.ChatService/SendMessage"
 	ChatService_GetConnectionState_FullMethodName = "/zchat.v1.ChatService/GetConnectionState"
 	ChatService_Logout_FullMethodName             = "/zchat.v1.ChatService/Logout"
+	ChatService_DownloadMedia_FullMethodName      = "/zchat.v1.ChatService/DownloadMedia"
+	ChatService_SearchChats_FullMethodName        = "/zchat.v1.ChatService/SearchChats"
 	ChatService_StreamEvents_FullMethodName       = "/zchat.v1.ChatService/StreamEvents"
 )
 
@@ -36,6 +38,8 @@ type ChatServiceClient interface {
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	GetConnectionState(ctx context.Context, in *GetConnectionStateRequest, opts ...grpc.CallOption) (*ConnectionState, error)
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
+	DownloadMedia(ctx context.Context, in *DownloadMediaRequest, opts ...grpc.CallOption) (*DownloadMediaResponse, error)
+	SearchChats(ctx context.Context, in *SearchChatsRequest, opts ...grpc.CallOption) (*SearchChatsResponse, error)
 	StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
 }
 
@@ -97,6 +101,26 @@ func (c *chatServiceClient) Logout(ctx context.Context, in *LogoutRequest, opts 
 	return out, nil
 }
 
+func (c *chatServiceClient) DownloadMedia(ctx context.Context, in *DownloadMediaRequest, opts ...grpc.CallOption) (*DownloadMediaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DownloadMediaResponse)
+	err := c.cc.Invoke(ctx, ChatService_DownloadMedia_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) SearchChats(ctx context.Context, in *SearchChatsRequest, opts ...grpc.CallOption) (*SearchChatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchChatsResponse)
+	err := c.cc.Invoke(ctx, ChatService_SearchChats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatServiceClient) StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], ChatService_StreamEvents_FullMethodName, cOpts...)
@@ -125,6 +149,8 @@ type ChatServiceServer interface {
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	GetConnectionState(context.Context, *GetConnectionStateRequest) (*ConnectionState, error)
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
+	DownloadMedia(context.Context, *DownloadMediaRequest) (*DownloadMediaResponse, error)
+	SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error)
 	StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error
 	mustEmbedUnimplementedChatServiceServer()
 }
@@ -150,6 +176,12 @@ func (UnimplementedChatServiceServer) GetConnectionState(context.Context, *GetCo
 }
 func (UnimplementedChatServiceServer) Logout(context.Context, *LogoutRequest) (*LogoutResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
+}
+func (UnimplementedChatServiceServer) DownloadMedia(context.Context, *DownloadMediaRequest) (*DownloadMediaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DownloadMedia not implemented")
+}
+func (UnimplementedChatServiceServer) SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchChats not implemented")
 }
 func (UnimplementedChatServiceServer) StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error {
 	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
@@ -265,6 +297,42 @@ func _ChatService_Logout_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatService_DownloadMedia_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DownloadMediaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).DownloadMedia(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_DownloadMedia_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).DownloadMedia(ctx, req.(*DownloadMediaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_SearchChats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchChatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).SearchChats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_SearchChats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).SearchChats(ctx, req.(*SearchChatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatService_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -302,6 +370,14 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Logout",
 			Handler:    _ChatService_Logout_Handler,
+		},
+		{
+			MethodName: "DownloadMedia",
+			Handler:    _ChatService_DownloadMedia_Handler,
+		},
+		{
+			MethodName: "SearchChats",
+			Handler:    _ChatService_SearchChats_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

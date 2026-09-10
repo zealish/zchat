@@ -104,6 +104,26 @@ func (c *Client) SendMessage(ctx context.Context, chatJID, body string, onDone f
 	}()
 }
 
+// SearchChats queries the daemon off the main loop.
+func (c *Client) SearchChats(ctx context.Context, query string, onDone func(string, []*zchatv1.Chat, error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+
+		resp, err := c.svc.SearchChats(callCtx, &zchatv1.SearchChatsRequest{Query: query})
+		idle(func() { onDone(query, resp.GetChats(), err) })
+	}()
+}
+
+// DownloadMedia fetches an attachment off the main loop. Media transfers can
+// far outlast a regular call, so they use the caller's context directly.
+func (c *Client) DownloadMedia(ctx context.Context, messageID string, onDone func(*zchatv1.Message, error)) {
+	go func() {
+		resp, err := c.svc.DownloadMedia(ctx, &zchatv1.DownloadMediaRequest{MessageId: messageID})
+		idle(func() { onDone(resp.GetMessage(), err) })
+	}()
+}
+
 func idle(f func()) {
 	glib.IdleAdd(f)
 }

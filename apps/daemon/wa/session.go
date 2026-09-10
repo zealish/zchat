@@ -317,13 +317,19 @@ func (s *Session) onReceipt(ctx context.Context, e *events.Receipt) {
 	}
 }
 
-// messageRow builds a message row from a parsed message. Non-text payloads are
-// skipped entirely in v0.1.
+// messageRow builds a message row from a parsed message. Messages carrying
+// neither text nor a supported attachment are skipped.
 func (s *Session) messageRow(ctx context.Context, info types.MessageInfo, msg *waE2E.Message) (daemonstore.Message, bool) {
 	body := extractText(msg)
-	if body == "" {
-		s.log.Debug().Str("type", info.Type).Str("id", info.ID).Msg("skipping non-text message")
+	kind, media := extractMedia(msg)
+	if body == "" && media == nil {
+		s.log.Debug().Str("type", info.Type).Str("id", info.ID).Msg("skipping unsupported message")
 		return daemonstore.Message{}, false
+	}
+	if media == nil {
+		kind = TypeText
+	} else if body == "" {
+		body = mediaPreview(kind, media)
 	}
 
 	status := daemonstore.StatusDelivered
@@ -344,14 +350,15 @@ func (s *Session) messageRow(ctx context.Context, info types.MessageInfo, msg *w
 		Sender:     info.Sender.ToNonAD().String(),
 		SenderName: senderName,
 		Body:       body,
-		Type:       "text",
+		Type:       kind,
 		Timestamp:  info.Timestamp.Unix(),
 		Outgoing:   info.IsFromMe,
 		Status:     status,
+		Media:      media,
 	}, true
 }
 
-// persistMessage stores a live text message and updates its chat row.
+// persistMessage stores a live message and updates its chat row.
 func (s *Session) persistMessage(ctx context.Context, info types.MessageInfo, msg *waE2E.Message) (*zchatv1.Message, bool) {
 	row, ok := s.messageRow(ctx, info, msg)
 	if !ok {
@@ -544,7 +551,7 @@ func extractText(msg *waE2E.Message) string {
 }
 
 func toProtoMessage(m daemonstore.Message) *zchatv1.Message {
-	return &zchatv1.Message{
+	out := &zchatv1.Message{
 		Id:         m.ID,
 		ChatJid:    m.ChatJID,
 		Sender:     m.Sender,
@@ -555,6 +562,20 @@ func toProtoMessage(m daemonstore.Message) *zchatv1.Message {
 		Outgoing:   m.Outgoing,
 		Status:     statusToProto(m.Status),
 	}
+	if m.Media != nil {
+		out.Media = &zchatv1.MediaInfo{
+			Mime:      m.Media.Mime,
+			Size:      m.Media.Size,
+			Filename:  m.Media.Filename,
+			Caption:   m.Media.Caption,
+			Path:      m.Media.Path,
+			Thumbnail: m.Media.Thumbnail,
+			Width:     m.Media.Width,
+			Height:    m.Media.Height,
+			Duration:  m.Media.Duration,
+		}
+	}
+	return out
 }
 
 func statusToProto(status string) zchatv1.MessageStatus {

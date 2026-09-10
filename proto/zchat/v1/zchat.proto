@@ -10,6 +10,8 @@ service ChatService {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc GetConnectionState(GetConnectionStateRequest) returns (ConnectionState);
   rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc DownloadMedia(DownloadMediaRequest) returns (DownloadMediaResponse);
+  rpc SearchChats(SearchChatsRequest) returns (SearchChatsResponse);
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
 }
 
@@ -39,10 +41,25 @@ message Message {
   string sender = 3;
   string sender_name = 4;
   string body = 5;
-  string type = 6; // "text" for v0.1; other values reserved for v0.2 media
+  string type = 6; // "text", "image", "video", "audio", "document", "sticker"
   int64 timestamp = 7; // unix seconds
   bool outgoing = 8;
   MessageStatus status = 9;
+  MediaInfo media = 10; // set when type != "text"
+}
+
+// MediaInfo describes an attachment. path is empty until the media has been
+// downloaded; clients call DownloadMedia to materialise it.
+message MediaInfo {
+  string mime = 1;
+  int64 size = 2;
+  string filename = 3;
+  string caption = 4;
+  string path = 5; // local file path, empty when not downloaded yet
+  bytes thumbnail = 6; // JPEG preview embedded by WhatsApp, may be empty
+  int32 width = 7;
+  int32 height = 8;
+  int32 duration = 9; // seconds, audio and video only
 }
 
 enum ConnectionStatus {
@@ -93,6 +110,23 @@ message GetConnectionStateRequest {}
 message LogoutRequest {}
 
 message LogoutResponse {}
+
+message DownloadMediaRequest {
+  string message_id = 1;
+}
+
+message DownloadMediaResponse {
+  Message message = 1;
+}
+
+message SearchChatsRequest {
+  string query = 1;
+  int32 limit = 2;
+}
+
+message SearchChatsResponse {
+  repeated Chat chats = 1;
+}
 
 message StreamEventsRequest {}
 

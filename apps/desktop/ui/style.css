@@ -40,3 +40,7 @@
   padding: 1px 7px;
   font-size: 0.8em;
 }
+
+.zchat-media {
+  border-radius: 8px;
+}
