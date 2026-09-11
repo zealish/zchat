@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -77,6 +78,9 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("load device: %w", err)
 	}
 
+	// Override WhatsMeow's library-default registration identity for new pairings.
+	store.DeviceProps.Os = proto.String("Mac OS")
+	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_SAFARI.Enum()
 	client := whatsmeow.NewClient(device, s.waLog.Sub("client"))
 	client.AddEventHandler(s.handleEvent)
 
@@ -356,8 +360,23 @@ func (s *Session) onReceipt(ctx context.Context, e *events.Receipt) {
 	}
 }
 
+// canonicalChatJID collapses WhatsApp LID chats onto their phone JID when the
+// local store knows the mapping, preventing one contact from appearing twice.
+func (s *Session) canonicalChatJID(ctx context.Context, jid types.JID) string {
+	jid = jid.ToNonAD()
+	if jid.Server != types.HiddenUserServer {
+		return jid.String()
+	}
+	client := s.currentClient()
+	if client != nil && client.Store != nil {
+		if alt, err := client.Store.GetAltJID(ctx, jid); err == nil && !alt.IsEmpty() {
+			return alt.ToNonAD().String()
+		}
+	}
+	return jid.String()
+}
+
 // messageRow builds a message row from a parsed message. Messages carrying
-// neither text nor a supported attachment are skipped.
 func (s *Session) messageRow(ctx context.Context, info types.MessageInfo, msg *waE2E.Message) (daemonstore.Message, bool) {
 	body := extractText(msg)
 	kind, media := extractMedia(msg)
@@ -370,33 +389,22 @@ func (s *Session) messageRow(ctx context.Context, info types.MessageInfo, msg *w
 	} else if body == "" {
 		body = mediaPreview(kind, media)
 	}
-
 	status := daemonstore.StatusDelivered
 	if info.IsFromMe {
 		status = daemonstore.StatusSent
 	}
 
-	// Only group messages show a sender label. History sync omits PushName, so
-	// fall back to the contact store.
 	senderName := info.PushName
 	if senderName == "" && !info.IsFromMe && info.Chat.Server == types.GroupServer {
 		senderName = s.contactName(ctx, info.Sender)
 	}
-
 	ctxInfo := messageContext(msg)
 	return daemonstore.Message{
-		ID:         info.ID,
-		ChatJID:    info.Chat.ToNonAD().String(),
-		Sender:     info.Sender.ToNonAD().String(),
-		SenderName: senderName,
-		Body:       body,
-		Type:       kind,
-		Timestamp:  info.Timestamp.Unix(),
-		Outgoing:   info.IsFromMe,
-		Status:     status,
-		Forwarded:  ctxInfo.GetIsForwarded(),
-		Media:      media,
-		Quoted:     s.quotedFrom(ctx, ctxInfo),
+		ID: info.ID, ChatJID: s.canonicalChatJID(ctx, info.Chat),
+		Sender: info.Sender.ToNonAD().String(), SenderName: senderName,
+		Body: body, Type: kind, Timestamp: info.Timestamp.Unix(),
+		Outgoing: info.IsFromMe, Status: status, Forwarded: ctxInfo.GetIsForwarded(),
+		Media: media, Quoted: s.quotedFrom(ctx, ctxInfo),
 	}, true
 }
 
@@ -444,12 +452,10 @@ func (s *Session) quotedFrom(ctx context.Context, info *waE2E.ContextInfo) *daem
 	}
 
 	return &daemonstore.Quoted{
-		ID:         info.GetStanzaID(),
-		Sender:     sender,
-		SenderName: senderName,
-		Body:       body,
-		Type:       kind,
+		ID: info.GetStanzaID(), Sender: sender, SenderName: senderName,
+		Body: body, Type: kind,
 	}
+
 }
 
 // persistMessage stores a live message and updates its chat row.
@@ -617,6 +623,41 @@ func (s *Session) SendText(ctx context.Context, chatJID, body, quotedID string) 
 		return nil, fmt.Errorf("send message: %w", sendErr)
 	}
 
+	s.finishSend(ctx, &row, jid, resp)
+	out := toProtoMessage(row)
+	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: out}})
+	s.publishChat(ctx, row.ChatJID)
+	return out, nil
+}
+
+// RetryText resends an existing failed outgoing text message without creating
+// a duplicate local row or changing its stable message id.
+func (s *Session) RetryText(ctx context.Context, row daemonstore.Message) (*zchatv1.Message, error) {
+	if !row.Outgoing || row.Body == "" {
+		return nil, errors.New("message is not retryable")
+	}
+	client := s.currentClient()
+	if client == nil {
+		return nil, errors.New("session not started")
+	}
+	jid, err := types.ParseJID(row.ChatJID)
+	if err != nil {
+		return nil, fmt.Errorf("parse jid %q: %w", row.ChatJID, err)
+	}
+	if err := s.store.UpdateMessageStatus(ctx, row.ID, daemonstore.StatusPending); err != nil {
+		return nil, err
+	}
+	row.Status = daemonstore.StatusPending
+	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: toProtoMessage(row)}})
+
+	payload := &waE2E.Message{Conversation: proto.String(row.Body)}
+	resp, sendErr := client.SendMessage(ctx, jid, payload, whatsmeow.SendRequestExtra{ID: row.ID})
+	if sendErr != nil {
+		_ = s.store.UpdateMessageStatus(ctx, row.ID, daemonstore.StatusFailed)
+		row.Status = daemonstore.StatusFailed
+		s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: toProtoMessage(row)}})
+		return nil, fmt.Errorf("send message: %w", sendErr)
+	}
 	s.finishSend(ctx, &row, jid, resp)
 	out := toProtoMessage(row)
 	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: out}})

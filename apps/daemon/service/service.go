@@ -265,6 +265,28 @@ func (s *Service) SetPresence(ctx context.Context, req *zchatv1.SetPresenceReque
 	return &zchatv1.SetPresenceResponse{}, nil
 }
 
+// RetryMessage retries a failed outgoing text message using its original payload.
+func (s *Service) RetryMessage(ctx context.Context, req *zchatv1.RetryMessageRequest) (*zchatv1.RetryMessageResponse, error) {
+	if req.GetMessageId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "message_id is required")
+	}
+	m, err := s.store.GetMessage(ctx, req.GetMessageId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "message not found")
+		}
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if !m.Outgoing || m.Body == "" {
+		return nil, status.Error(codes.InvalidArgument, "message is not a retryable outgoing text message")
+	}
+	msg, err := s.session.RetryText(ctx, m)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.RetryMessageResponse{Message: msg}, nil
+}
+
 // StreamEvents pushes live updates. The current connection state (and any
 // pending QR code) is sent first so an attaching client never has to poll.
 func (s *Service) StreamEvents(_ *zchatv1.StreamEventsRequest, stream zchatv1.ChatService_StreamEventsServer) error {

@@ -1947,6 +1947,94 @@ func (x *SetPresenceRequest) GetAvailable() bool {
 	return false
 }
 
+type RetryMessageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RetryMessageRequest) Reset() {
+	*x = RetryMessageRequest{}
+	mi := &file_zchat_v1_zchat_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RetryMessageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RetryMessageRequest) ProtoMessage() {}
+
+func (x *RetryMessageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_zchat_v1_zchat_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RetryMessageRequest.ProtoReflect.Descriptor instead.
+func (*RetryMessageRequest) Descriptor() ([]byte, []int) {
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *RetryMessageRequest) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+type RetryMessageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RetryMessageResponse) Reset() {
+	*x = RetryMessageResponse{}
+	mi := &file_zchat_v1_zchat_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RetryMessageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RetryMessageResponse) ProtoMessage() {}
+
+func (x *RetryMessageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zchat_v1_zchat_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RetryMessageResponse.ProtoReflect.Descriptor instead.
+func (*RetryMessageResponse) Descriptor() ([]byte, []int) {
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *RetryMessageResponse) GetMessage() *Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
 type SetPresenceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1955,7 +2043,7 @@ type SetPresenceResponse struct {
 
 func (x *SetPresenceResponse) Reset() {
 	*x = SetPresenceResponse{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[31]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1967,7 +2055,7 @@ func (x *SetPresenceResponse) String() string {
 func (*SetPresenceResponse) ProtoMessage() {}
 
 func (x *SetPresenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[31]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1980,7 +2068,7 @@ func (x *SetPresenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPresenceResponse.ProtoReflect.Descriptor instead.
 func (*SetPresenceResponse) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{31}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{33}
 }
 
 type Event struct {
@@ -2001,7 +2089,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_zchat_v1_zchat_proto_msgTypes[32]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2013,7 +2101,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_zchat_v1_zchat_proto_msgTypes[32]
+	mi := &file_zchat_v1_zchat_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2026,7 +2114,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{32}
+	return file_zchat_v1_zchat_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *Event) GetPayload() isEvent_Payload {
@@ -2278,7 +2366,12 @@ const file_zchat_v1_zchat_proto_rawDesc = "" +
 	"\x12SetPresenceRequest\x12\x19\n" +
 	"\bchat_jid\x18\x01 \x01(\tR\achatJid\x12\x16\n" +
 	"\x06typing\x18\x02 \x01(\bR\x06typing\x12\x1c\n" +
-	"\tavailable\x18\x03 \x01(\bR\tavailable\"\x15\n" +
+	"\tavailable\x18\x03 \x01(\bR\tavailable\"4\n" +
+	"\x13RetryMessageRequest\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\"C\n" +
+	"\x14RetryMessageResponse\x12+\n" +
+	"\amessage\x18\x01 \x01(\v2\x11.zchat.v1.MessageR\amessage\"\x15\n" +
 	"\x13SetPresenceResponse\"\xce\x03\n" +
 	"\x05Event\x12>\n" +
 	"\x10message_received\x18\x01 \x01(\v2\x11.zchat.v1.MessageH\x00R\x0fmessageReceived\x12<\n" +
@@ -2302,7 +2395,7 @@ const file_zchat_v1_zchat_proto_rawDesc = "" +
 	"\x1eCONNECTION_STATUS_DISCONNECTED\x10\x01\x12 \n" +
 	"\x1cCONNECTION_STATUS_CONNECTING\x10\x02\x12\x1f\n" +
 	"\x1bCONNECTION_STATUS_CONNECTED\x10\x03\x12 \n" +
-	"\x1cCONNECTION_STATUS_LOGGED_OUT\x10\x042\xdd\a\n" +
+	"\x1cCONNECTION_STATUS_LOGGED_OUT\x10\x042\xac\b\n" +
 	"\vChatService\x12A\n" +
 	"\bGetChats\x12\x19.zchat.v1.GetChatsRequest\x1a\x1a.zchat.v1.GetChatsResponse\x12J\n" +
 	"\vGetMessages\x12\x1c.zchat.v1.GetMessagesRequest\x1a\x1d.zchat.v1.GetMessagesResponse\x12J\n" +
@@ -2316,7 +2409,8 @@ const file_zchat_v1_zchat_proto_rawDesc = "" +
 	"\x06Logout\x12\x17.zchat.v1.LogoutRequest\x1a\x18.zchat.v1.LogoutResponse\x12P\n" +
 	"\rDownloadMedia\x12\x1e.zchat.v1.DownloadMediaRequest\x1a\x1f.zchat.v1.DownloadMediaResponse\x12J\n" +
 	"\vSearchChats\x12\x1c.zchat.v1.SearchChatsRequest\x1a\x1d.zchat.v1.SearchChatsResponse\x12J\n" +
-	"\vSetPresence\x12\x1c.zchat.v1.SetPresenceRequest\x1a\x1d.zchat.v1.SetPresenceResponse\x12@\n" +
+	"\vSetPresence\x12\x1c.zchat.v1.SetPresenceRequest\x1a\x1d.zchat.v1.SetPresenceResponse\x12M\n" +
+	"\fRetryMessage\x12\x1d.zchat.v1.RetryMessageRequest\x1a\x1e.zchat.v1.RetryMessageResponse\x12@\n" +
 	"\fStreamEvents\x12\x1d.zchat.v1.StreamEventsRequest\x1a\x0f.zchat.v1.Event0\x01B7Z5github.com/zealish/zchat/packages/ipc/zchatv1;zchatv1b\x06proto3"
 
 var (
@@ -2332,7 +2426,7 @@ func file_zchat_v1_zchat_proto_rawDescGZIP() []byte {
 }
 
 var file_zchat_v1_zchat_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_zchat_v1_zchat_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_zchat_v1_zchat_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_zchat_v1_zchat_proto_goTypes = []any{
 	(MessageStatus)(0),                // 0: zchat.v1.MessageStatus
 	(ConnectionStatus)(0),             // 1: zchat.v1.ConnectionStatus
@@ -2367,8 +2461,10 @@ var file_zchat_v1_zchat_proto_goTypes = []any{
 	(*MessageDeleted)(nil),            // 30: zchat.v1.MessageDeleted
 	(*PresenceUpdate)(nil),            // 31: zchat.v1.PresenceUpdate
 	(*SetPresenceRequest)(nil),        // 32: zchat.v1.SetPresenceRequest
-	(*SetPresenceResponse)(nil),       // 33: zchat.v1.SetPresenceResponse
-	(*Event)(nil),                     // 34: zchat.v1.Event
+	(*RetryMessageRequest)(nil),       // 33: zchat.v1.RetryMessageRequest
+	(*RetryMessageResponse)(nil),      // 34: zchat.v1.RetryMessageResponse
+	(*SetPresenceResponse)(nil),       // 35: zchat.v1.SetPresenceResponse
+	(*Event)(nil),                     // 36: zchat.v1.Event
 }
 var file_zchat_v1_zchat_proto_depIdxs = []int32{
 	0,  // 0: zchat.v1.Message.status:type_name -> zchat.v1.MessageStatus
@@ -2383,44 +2479,47 @@ var file_zchat_v1_zchat_proto_depIdxs = []int32{
 	2,  // 9: zchat.v1.UpdateChatResponse.chat:type_name -> zchat.v1.Chat
 	3,  // 10: zchat.v1.DownloadMediaResponse.message:type_name -> zchat.v1.Message
 	2,  // 11: zchat.v1.SearchChatsResponse.chats:type_name -> zchat.v1.Chat
-	3,  // 12: zchat.v1.Event.message_received:type_name -> zchat.v1.Message
-	3,  // 13: zchat.v1.Event.message_updated:type_name -> zchat.v1.Message
-	2,  // 14: zchat.v1.Event.chat_updated:type_name -> zchat.v1.Chat
-	29, // 15: zchat.v1.Event.qr_updated:type_name -> zchat.v1.QRUpdate
-	6,  // 16: zchat.v1.Event.connection_state:type_name -> zchat.v1.ConnectionState
-	30, // 17: zchat.v1.Event.message_deleted:type_name -> zchat.v1.MessageDeleted
-	31, // 18: zchat.v1.Event.presence_changed:type_name -> zchat.v1.PresenceUpdate
-	7,  // 19: zchat.v1.ChatService.GetChats:input_type -> zchat.v1.GetChatsRequest
-	9,  // 20: zchat.v1.ChatService.GetMessages:input_type -> zchat.v1.GetMessagesRequest
-	11, // 21: zchat.v1.ChatService.SendMessage:input_type -> zchat.v1.SendMessageRequest
-	13, // 22: zchat.v1.ChatService.SendMedia:input_type -> zchat.v1.SendMediaRequest
-	15, // 23: zchat.v1.ChatService.ForwardMessage:input_type -> zchat.v1.ForwardMessageRequest
-	17, // 24: zchat.v1.ChatService.DeleteMessage:input_type -> zchat.v1.DeleteMessageRequest
-	19, // 25: zchat.v1.ChatService.UpdateChat:input_type -> zchat.v1.UpdateChatRequest
-	21, // 26: zchat.v1.ChatService.GetConnectionState:input_type -> zchat.v1.GetConnectionStateRequest
-	22, // 27: zchat.v1.ChatService.Logout:input_type -> zchat.v1.LogoutRequest
-	24, // 28: zchat.v1.ChatService.DownloadMedia:input_type -> zchat.v1.DownloadMediaRequest
-	26, // 29: zchat.v1.ChatService.SearchChats:input_type -> zchat.v1.SearchChatsRequest
-	32, // 30: zchat.v1.ChatService.SetPresence:input_type -> zchat.v1.SetPresenceRequest
-	28, // 31: zchat.v1.ChatService.StreamEvents:input_type -> zchat.v1.StreamEventsRequest
-	8,  // 32: zchat.v1.ChatService.GetChats:output_type -> zchat.v1.GetChatsResponse
-	10, // 33: zchat.v1.ChatService.GetMessages:output_type -> zchat.v1.GetMessagesResponse
-	12, // 34: zchat.v1.ChatService.SendMessage:output_type -> zchat.v1.SendMessageResponse
-	14, // 35: zchat.v1.ChatService.SendMedia:output_type -> zchat.v1.SendMediaResponse
-	16, // 36: zchat.v1.ChatService.ForwardMessage:output_type -> zchat.v1.ForwardMessageResponse
-	18, // 37: zchat.v1.ChatService.DeleteMessage:output_type -> zchat.v1.DeleteMessageResponse
-	20, // 38: zchat.v1.ChatService.UpdateChat:output_type -> zchat.v1.UpdateChatResponse
-	6,  // 39: zchat.v1.ChatService.GetConnectionState:output_type -> zchat.v1.ConnectionState
-	23, // 40: zchat.v1.ChatService.Logout:output_type -> zchat.v1.LogoutResponse
-	25, // 41: zchat.v1.ChatService.DownloadMedia:output_type -> zchat.v1.DownloadMediaResponse
-	27, // 42: zchat.v1.ChatService.SearchChats:output_type -> zchat.v1.SearchChatsResponse
-	33, // 43: zchat.v1.ChatService.SetPresence:output_type -> zchat.v1.SetPresenceResponse
-	34, // 44: zchat.v1.ChatService.StreamEvents:output_type -> zchat.v1.Event
-	32, // [32:45] is the sub-list for method output_type
-	19, // [19:32] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	3,  // 12: zchat.v1.RetryMessageResponse.message:type_name -> zchat.v1.Message
+	3,  // 13: zchat.v1.Event.message_received:type_name -> zchat.v1.Message
+	3,  // 14: zchat.v1.Event.message_updated:type_name -> zchat.v1.Message
+	2,  // 15: zchat.v1.Event.chat_updated:type_name -> zchat.v1.Chat
+	29, // 16: zchat.v1.Event.qr_updated:type_name -> zchat.v1.QRUpdate
+	6,  // 17: zchat.v1.Event.connection_state:type_name -> zchat.v1.ConnectionState
+	30, // 18: zchat.v1.Event.message_deleted:type_name -> zchat.v1.MessageDeleted
+	31, // 19: zchat.v1.Event.presence_changed:type_name -> zchat.v1.PresenceUpdate
+	7,  // 20: zchat.v1.ChatService.GetChats:input_type -> zchat.v1.GetChatsRequest
+	9,  // 21: zchat.v1.ChatService.GetMessages:input_type -> zchat.v1.GetMessagesRequest
+	11, // 22: zchat.v1.ChatService.SendMessage:input_type -> zchat.v1.SendMessageRequest
+	13, // 23: zchat.v1.ChatService.SendMedia:input_type -> zchat.v1.SendMediaRequest
+	15, // 24: zchat.v1.ChatService.ForwardMessage:input_type -> zchat.v1.ForwardMessageRequest
+	17, // 25: zchat.v1.ChatService.DeleteMessage:input_type -> zchat.v1.DeleteMessageRequest
+	19, // 26: zchat.v1.ChatService.UpdateChat:input_type -> zchat.v1.UpdateChatRequest
+	21, // 27: zchat.v1.ChatService.GetConnectionState:input_type -> zchat.v1.GetConnectionStateRequest
+	22, // 28: zchat.v1.ChatService.Logout:input_type -> zchat.v1.LogoutRequest
+	24, // 29: zchat.v1.ChatService.DownloadMedia:input_type -> zchat.v1.DownloadMediaRequest
+	26, // 30: zchat.v1.ChatService.SearchChats:input_type -> zchat.v1.SearchChatsRequest
+	32, // 31: zchat.v1.ChatService.SetPresence:input_type -> zchat.v1.SetPresenceRequest
+	33, // 32: zchat.v1.ChatService.RetryMessage:input_type -> zchat.v1.RetryMessageRequest
+	28, // 33: zchat.v1.ChatService.StreamEvents:input_type -> zchat.v1.StreamEventsRequest
+	8,  // 34: zchat.v1.ChatService.GetChats:output_type -> zchat.v1.GetChatsResponse
+	10, // 35: zchat.v1.ChatService.GetMessages:output_type -> zchat.v1.GetMessagesResponse
+	12, // 36: zchat.v1.ChatService.SendMessage:output_type -> zchat.v1.SendMessageResponse
+	14, // 37: zchat.v1.ChatService.SendMedia:output_type -> zchat.v1.SendMediaResponse
+	16, // 38: zchat.v1.ChatService.ForwardMessage:output_type -> zchat.v1.ForwardMessageResponse
+	18, // 39: zchat.v1.ChatService.DeleteMessage:output_type -> zchat.v1.DeleteMessageResponse
+	20, // 40: zchat.v1.ChatService.UpdateChat:output_type -> zchat.v1.UpdateChatResponse
+	6,  // 41: zchat.v1.ChatService.GetConnectionState:output_type -> zchat.v1.ConnectionState
+	23, // 42: zchat.v1.ChatService.Logout:output_type -> zchat.v1.LogoutResponse
+	25, // 43: zchat.v1.ChatService.DownloadMedia:output_type -> zchat.v1.DownloadMediaResponse
+	27, // 44: zchat.v1.ChatService.SearchChats:output_type -> zchat.v1.SearchChatsResponse
+	35, // 45: zchat.v1.ChatService.SetPresence:output_type -> zchat.v1.SetPresenceResponse
+	34, // 46: zchat.v1.ChatService.RetryMessage:output_type -> zchat.v1.RetryMessageResponse
+	36, // 47: zchat.v1.ChatService.StreamEvents:output_type -> zchat.v1.Event
+	34, // [34:48] is the sub-list for method output_type
+	20, // [20:34] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_zchat_v1_zchat_proto_init() }
@@ -2429,7 +2528,7 @@ func file_zchat_v1_zchat_proto_init() {
 		return
 	}
 	file_zchat_v1_zchat_proto_msgTypes[17].OneofWrappers = []any{}
-	file_zchat_v1_zchat_proto_msgTypes[32].OneofWrappers = []any{
+	file_zchat_v1_zchat_proto_msgTypes[34].OneofWrappers = []any{
 		(*Event_MessageReceived)(nil),
 		(*Event_MessageUpdated)(nil),
 		(*Event_ChatUpdated)(nil),
@@ -2444,7 +2543,7 @@ func file_zchat_v1_zchat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zchat_v1_zchat_proto_rawDesc), len(file_zchat_v1_zchat_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   33,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

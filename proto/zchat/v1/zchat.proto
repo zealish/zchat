@@ -17,6 +17,7 @@ service ChatService {
   rpc DownloadMedia(DownloadMediaRequest) returns (DownloadMediaResponse);
   rpc SearchChats(SearchChatsRequest) returns (SearchChatsResponse);
   rpc SetPresence(SetPresenceRequest) returns (SetPresenceResponse);
+  rpc RetryMessage(RetryMessageRequest) returns (RetryMessageResponse);
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
 }
 
@@ -225,6 +226,14 @@ message SetPresenceRequest {
   string chat_jid = 1;
   bool typing = 2;
   bool available = 3;
+}
+
+message RetryMessageRequest {
+  string message_id = 1;
+}
+
+message RetryMessageResponse {
+  Message message = 1;
 }
 
 message SetPresenceResponse {}

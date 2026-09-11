@@ -47,6 +47,8 @@ Rules:
 - Platform changes require a new linked device.
 - ZChat branding is never included inside the WhatsApp UserAgent.
 
+Existing sessions paired before this configuration retain their original WhatsMeow device properties. They must be explicitly logged out and paired again to advertise the Mac OS/Safari fingerprint.
+
 ---
 
 # 17.2 Session Persistence
