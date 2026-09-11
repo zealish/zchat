@@ -110,6 +110,20 @@ func (c *Client) SendMessage(ctx context.Context, chatJID, body, quotedID string
 	}()
 }
 
+// SendMedia uploads a local file as an attachment off the main loop. Uploads
+// can far outlast a regular call, so they use the caller's context directly.
+func (c *Client) SendMedia(ctx context.Context, chatJID, filePath, caption, quotedID string, onDone func(error)) {
+	go func() {
+		_, err := c.svc.SendMedia(ctx, &zchatv1.SendMediaRequest{
+			ChatJid:         chatJID,
+			FilePath:        filePath,
+			Caption:         caption,
+			QuotedMessageId: quotedID,
+		})
+		idle(func() { onDone(err) })
+	}()
+}
+
 // ForwardMessage re-sends a message to another chat off the main loop.
 func (c *Client) ForwardMessage(ctx context.Context, messageID, toChatJID string, onDone func(error)) {
 	go func() {

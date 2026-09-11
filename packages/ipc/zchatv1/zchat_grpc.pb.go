@@ -22,6 +22,7 @@ const (
 	ChatService_GetChats_FullMethodName           = "/zchat.v1.ChatService/GetChats"
 	ChatService_GetMessages_FullMethodName        = "/zchat.v1.ChatService/GetMessages"
 	ChatService_SendMessage_FullMethodName        = "/zchat.v1.ChatService/SendMessage"
+	ChatService_SendMedia_FullMethodName          = "/zchat.v1.ChatService/SendMedia"
 	ChatService_ForwardMessage_FullMethodName     = "/zchat.v1.ChatService/ForwardMessage"
 	ChatService_DeleteMessage_FullMethodName      = "/zchat.v1.ChatService/DeleteMessage"
 	ChatService_UpdateChat_FullMethodName         = "/zchat.v1.ChatService/UpdateChat"
@@ -39,6 +40,7 @@ type ChatServiceClient interface {
 	GetChats(ctx context.Context, in *GetChatsRequest, opts ...grpc.CallOption) (*GetChatsResponse, error)
 	GetMessages(ctx context.Context, in *GetMessagesRequest, opts ...grpc.CallOption) (*GetMessagesResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
+	SendMedia(ctx context.Context, in *SendMediaRequest, opts ...grpc.CallOption) (*SendMediaResponse, error)
 	ForwardMessage(ctx context.Context, in *ForwardMessageRequest, opts ...grpc.CallOption) (*ForwardMessageResponse, error)
 	DeleteMessage(ctx context.Context, in *DeleteMessageRequest, opts ...grpc.CallOption) (*DeleteMessageResponse, error)
 	UpdateChat(ctx context.Context, in *UpdateChatRequest, opts ...grpc.CallOption) (*UpdateChatResponse, error)
@@ -81,6 +83,16 @@ func (c *chatServiceClient) SendMessage(ctx context.Context, in *SendMessageRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendMessageResponse)
 	err := c.cc.Invoke(ctx, ChatService_SendMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) SendMedia(ctx context.Context, in *SendMediaRequest, opts ...grpc.CallOption) (*SendMediaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SendMediaResponse)
+	err := c.cc.Invoke(ctx, ChatService_SendMedia_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +195,7 @@ type ChatServiceServer interface {
 	GetChats(context.Context, *GetChatsRequest) (*GetChatsResponse, error)
 	GetMessages(context.Context, *GetMessagesRequest) (*GetMessagesResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
+	SendMedia(context.Context, *SendMediaRequest) (*SendMediaResponse, error)
 	ForwardMessage(context.Context, *ForwardMessageRequest) (*ForwardMessageResponse, error)
 	DeleteMessage(context.Context, *DeleteMessageRequest) (*DeleteMessageResponse, error)
 	UpdateChat(context.Context, *UpdateChatRequest) (*UpdateChatResponse, error)
@@ -209,6 +222,9 @@ func (UnimplementedChatServiceServer) GetMessages(context.Context, *GetMessagesR
 }
 func (UnimplementedChatServiceServer) SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendMessage not implemented")
+}
+func (UnimplementedChatServiceServer) SendMedia(context.Context, *SendMediaRequest) (*SendMediaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SendMedia not implemented")
 }
 func (UnimplementedChatServiceServer) ForwardMessage(context.Context, *ForwardMessageRequest) (*ForwardMessageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForwardMessage not implemented")
@@ -305,6 +321,24 @@ func _ChatService_SendMessage_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ChatServiceServer).SendMessage(ctx, req.(*SendMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_SendMedia_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SendMediaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).SendMedia(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_SendMedia_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).SendMedia(ctx, req.(*SendMediaRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -464,6 +498,10 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendMessage",
 			Handler:    _ChatService_SendMessage_Handler,
+		},
+		{
+			MethodName: "SendMedia",
+			Handler:    _ChatService_SendMedia_Handler,
 		},
 		{
 			MethodName: "ForwardMessage",

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.zealish.ZChat</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>ZChat</name>
+  <summary>Native Linux desktop client for WhatsApp Multi-Device</summary>
+
+  <description>
+    <p>
+      ZChat is a lightweight GTK4 and Libadwaita client for WhatsApp
+      Multi-Device. It talks to a local background daemon over a Unix socket and
+      stores all chats, messages and media in your own XDG directories.
+    </p>
+    <p>
+      ZChat is an independent open source project and is not affiliated with,
+      endorsed by, or sponsored by WhatsApp LLC or Meta Platforms, Inc.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.zealish.ZChat.desktop</launchable>
+  <url type="homepage">https://github.com/zealish/zchat</url>
+
+  <developer id="com.zealish">
+    <name>Zealish</name>
+  </developer>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+  </content_rating>
+
+  <releases>
+    <release version="0.3.0" date="2026-09-11"/>
+  </releases>
+</component>

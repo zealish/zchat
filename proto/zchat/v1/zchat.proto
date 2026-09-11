@@ -8,6 +8,7 @@ service ChatService {
   rpc GetChats(GetChatsRequest) returns (GetChatsResponse);
   rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc SendMedia(SendMediaRequest) returns (SendMediaResponse);
   rpc ForwardMessage(ForwardMessageRequest) returns (ForwardMessageResponse);
   rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
   rpc UpdateChat(UpdateChatRequest) returns (UpdateChatResponse);
@@ -120,6 +121,20 @@ message SendMessageRequest {
 }
 
 message SendMessageResponse {
+  Message message = 1;
+}
+
+// SendMediaRequest uploads a local file as an attachment. The daemon reads
+// file_path itself, so client and daemon must share a filesystem, which the
+// Unix socket transport already implies.
+message SendMediaRequest {
+  string chat_jid = 1;
+  string file_path = 2;
+  string caption = 3;
+  string quoted_message_id = 4; // optional; reply to this message
+}
+
+message SendMediaResponse {
   Message message = 1;
 }
 

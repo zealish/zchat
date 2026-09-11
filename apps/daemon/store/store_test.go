@@ -127,3 +127,35 @@ func TestListMessagesIsChronological(t *testing.T) {
 		}
 	}
 }
+
+func TestRecentIncomingSkipsOwnMessages(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	msgs := []Message{
+		{ID: "in1", ChatJID: "g@g.us", Sender: "a@s.whatsapp.net", Type: "text", Timestamp: 10},
+		{ID: "out", ChatJID: "g@g.us", Sender: "me@s.whatsapp.net", Type: "text", Timestamp: 20, Outgoing: true},
+		{ID: "in2", ChatJID: "g@g.us", Sender: "b@s.whatsapp.net", Type: "text", Timestamp: 30},
+	}
+	for _, m := range msgs {
+		if err := s.InsertMessage(ctx, m); err != nil {
+			t.Fatalf("insert %s: %v", m.ID, err)
+		}
+	}
+
+	refs, err := s.RecentIncoming(ctx, "g@g.us", 10)
+	if err != nil {
+		t.Fatalf("recent incoming: %v", err)
+	}
+	want := []MessageRef{
+		{ID: "in2", Sender: "b@s.whatsapp.net"},
+		{ID: "in1", Sender: "a@s.whatsapp.net"},
+	}
+	if len(refs) != len(want) {
+		t.Fatalf("want %d refs, got %d: %+v", len(want), len(refs), refs)
+	}
+	for i, ref := range refs {
+		if ref != want[i] {
+			t.Errorf("ref %d = %+v, want %+v", i, ref, want[i])
+		}
+	}
+}

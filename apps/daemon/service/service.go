@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -117,12 +118,22 @@ func (s *Service) GetMessages(ctx context.Context, req *zchatv1.GetMessagesReque
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// Opening a chat clears its unread badge everywhere.
+	// Opening a chat clears its unread badge everywhere, locally and on the
+	// user's phone.
 	if req.GetBeforeTimestamp() == 0 {
+		unread := int32(0)
+		if chat, err := s.store.GetChat(ctx, chatJID); err == nil {
+			unread = chat.Unread
+		}
 		if err := s.store.ClearUnread(ctx, chatJID); err != nil {
 			s.log.Warn().Err(err).Str("chat", chatJID).Msg("clear unread")
 		} else if chat, err := s.store.GetChat(ctx, chatJID); err == nil {
 			s.broker.Publish(&zchatv1.Event{Payload: &zchatv1.Event_ChatUpdated{ChatUpdated: wa.ToProtoChat(chat)}})
+		}
+		if unread > 0 {
+			if err := s.session.MarkRead(ctx, chatJID, int(unread)); err != nil {
+				s.log.Warn().Err(err).Str("chat", chatJID).Msg("send read receipt")
+			}
 		}
 	}
 
@@ -156,6 +167,28 @@ func (s *Service) SendMessage(ctx context.Context, req *zchatv1.SendMessageReque
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	return &zchatv1.SendMessageResponse{Message: msg}, nil
+}
+
+// SendMedia uploads a local file and sends it as an attachment.
+func (s *Service) SendMedia(ctx context.Context, req *zchatv1.SendMediaRequest) (*zchatv1.SendMediaResponse, error) {
+	if req.GetChatJid() == "" {
+		return nil, status.Error(codes.InvalidArgument, "chat_jid is required")
+	}
+	if req.GetFilePath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "file_path is required")
+	}
+
+	msg, err := s.session.SendMedia(ctx, req.GetChatJid(), req.GetFilePath(), req.GetCaption(), req.GetQuotedMessageId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "quoted message not found")
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.SendMediaResponse{Message: msg}, nil
 }
 
 // ForwardMessage re-sends an existing message to another chat.

@@ -618,6 +618,23 @@ func (s *Session) SendText(ctx context.Context, chatJID, body, quotedID string) 
 // buildReply resolves the quoted message and wraps the reply body in the
 // extended text message WhatsApp expects for replies.
 func (s *Session) buildReply(ctx context.Context, chat types.JID, body, quotedID string) (*daemonstore.Quoted, *waE2E.Message, error) {
+	quoted, ctxInfo, err := s.replyContext(ctx, chat, quotedID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	payload := &waE2E.Message{
+		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text:        proto.String(body),
+			ContextInfo: ctxInfo,
+		},
+	}
+	return quoted, payload, nil
+}
+
+// replyContext resolves the quoted message into the snapshot stored locally and
+// the ContextInfo the recipient needs to render the quote.
+func (s *Session) replyContext(ctx context.Context, chat types.JID, quotedID string) (*daemonstore.Quoted, *waE2E.ContextInfo, error) {
 	original, err := s.store.GetMessage(ctx, quotedID)
 	if err != nil {
 		return nil, nil, err
@@ -635,15 +652,10 @@ func (s *Session) buildReply(ctx context.Context, chat types.JID, body, quotedID
 		return nil, nil, fmt.Errorf("parse quoted sender %q: %w", original.Sender, err)
 	}
 
-	payload := &waE2E.Message{
-		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
-			Text: proto.String(body),
-			ContextInfo: &waE2E.ContextInfo{
-				StanzaID:      proto.String(original.ID),
-				Participant:   proto.String(sender.ToNonAD().String()),
-				QuotedMessage: quotedPayload(ctx, s.store, original),
-			},
-		},
+	ctxInfo := &waE2E.ContextInfo{
+		StanzaID:      proto.String(original.ID),
+		Participant:   proto.String(sender.ToNonAD().String()),
+		QuotedMessage: quotedPayload(ctx, s.store, original),
 	}
 	quoted := &daemonstore.Quoted{
 		ID:         original.ID,
@@ -652,7 +664,7 @@ func (s *Session) buildReply(ctx context.Context, chat types.JID, body, quotedID
 		Body:       original.Body,
 		Type:       original.Type,
 	}
-	return quoted, payload, nil
+	return quoted, ctxInfo, nil
 }
 
 // quotedPayload rebuilds the message being replied to. WhatsApp renders the

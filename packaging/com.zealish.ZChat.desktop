@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=ZChat
+GenericName=WhatsApp Client
+Comment=Native Linux desktop client for WhatsApp Multi-Device
+Exec=zchat
+Icon=com.zealish.ZChat
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=whatsapp;chat;messaging;
+StartupNotify=true
+StartupWMClass=com.zealish.ZChat

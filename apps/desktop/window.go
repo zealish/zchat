@@ -46,11 +46,19 @@ type window struct {
 	messageScrl  *gtk.ScrolledWindow
 	messageEntry *gtk.Entry
 	sendButton   *gtk.Button
+	attachButton *gtk.Button
 	searchEntry  *gtk.SearchEntry
 	replyBar     *gtk.Box
 	replySender  *gtk.Label
 	replyBody    *gtk.Label
 	replyCancel  *gtk.Button
+
+	attachmentBar    *gtk.Box
+	attachmentThumb  *gtk.Picture
+	attachmentIcon   *gtk.Image
+	attachmentName   *gtk.Label
+	attachmentSize   *gtk.Label
+	attachmentCancel *gtk.Button
 
 	chats             *gioutil.ListModel[*zchatv1.Chat]
 	chatSel           *gtk.SingleSelection
@@ -71,6 +79,7 @@ type window struct {
 	activeChat  string
 	activeGroup bool
 	replyTo     *zchatv1.Message
+	pending     *attachment
 }
 
 // chatFilter selects which slice of the chat list the sidebar shows.
@@ -102,11 +111,20 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		messageScrl:   builder.GetObject("message_scroll").Cast().(*gtk.ScrolledWindow),
 		messageEntry:  builder.GetObject("message_entry").Cast().(*gtk.Entry),
 		sendButton:    builder.GetObject("send_button").Cast().(*gtk.Button),
+		attachButton:  builder.GetObject("attach_button").Cast().(*gtk.Button),
 		searchEntry:   builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
 		replyBar:      builder.GetObject("reply_bar").Cast().(*gtk.Box),
 		replySender:   builder.GetObject("reply_sender").Cast().(*gtk.Label),
 		replyBody:     builder.GetObject("reply_body").Cast().(*gtk.Label),
 		replyCancel:   builder.GetObject("reply_cancel").Cast().(*gtk.Button),
+
+		attachmentBar:    builder.GetObject("attachment_bar").Cast().(*gtk.Box),
+		attachmentThumb:  builder.GetObject("attachment_thumb").Cast().(*gtk.Picture),
+		attachmentIcon:   builder.GetObject("attachment_icon").Cast().(*gtk.Image),
+		attachmentName:   builder.GetObject("attachment_name").Cast().(*gtk.Label),
+		attachmentSize:   builder.GetObject("attachment_size").Cast().(*gtk.Label),
+		attachmentCancel: builder.GetObject("attachment_cancel").Cast().(*gtk.Button),
+
 		chats:         chatModelType.New(),
 		messages:      messageModelType.New(),
 		chatIndex:     make(map[string]*zchatv1.Chat),
@@ -119,6 +137,9 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 	w.setupMessageList()
 	w.setupComposer()
 	w.setupSearch()
+	w.setupShortcuts()
+	w.setupDragAndDrop()
+	w.setupPasteShortcut()
 	w.setupAutoScroll()
 	w.mainStack.SetVisibleChildName("qr")
 
@@ -456,6 +477,7 @@ func (w *window) openChat(chat *zchatv1.Chat) {
 	w.activeChat = chat.GetJid()
 	w.setComposerEnabled(true)
 	w.activeGroup = chat.GetIsGroup()
+	w.cancelAttachment()
 	w.contentPage.SetTitle(displayName(chat))
 	clear(w.messageRows)
 	w.messages.Splice(0, w.messages.Len())
@@ -862,10 +884,16 @@ func humanSize(size int64) string {
 func (w *window) setComposerEnabled(enabled bool) {
 	w.messageEntry.SetSensitive(enabled)
 	w.sendButton.SetSensitive(enabled)
+	w.attachButton.SetSensitive(enabled)
 }
 
 func (w *window) setupComposer() {
 	send := func() {
+		if w.pending != nil {
+			w.sendAttachment()
+			return
+		}
+
 		body := strings.TrimSpace(w.messageEntry.Text())
 		if body == "" || w.activeChat == "" || w.client == nil {
 			return
@@ -881,9 +909,11 @@ func (w *window) setupComposer() {
 		})
 	}
 
+	w.attachButton.ConnectClicked(w.chooseAttachment)
 	w.sendButton.ConnectClicked(send)
 	w.messageEntry.ConnectActivate(send)
 	w.replyCancel.ConnectClicked(w.cancelReply)
+	w.attachmentCancel.ConnectClicked(w.cancelAttachment)
 	w.setComposerEnabled(false)
 }
 

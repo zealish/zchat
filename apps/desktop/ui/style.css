@@ -52,6 +52,12 @@
   padding: 4px 8px;
 }
 
+.zchat-attachment-bar {
+  border-radius: 6px;
+  background-color: alpha(currentColor, 0.06);
+  padding: 6px 8px;
+}
+
 .zchat-quoted {
   border-left: 3px solid @accent_color;
   border-radius: 6px;

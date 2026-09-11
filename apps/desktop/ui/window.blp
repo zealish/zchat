@@ -143,9 +143,62 @@ Adw.ApplicationWindow window {
                   }
                 }
 
+                Gtk.Box attachment_bar {
+                  orientation: horizontal;
+                  spacing: 8;
+                  visible: false;
+                  styles ["zchat-attachment-bar"]
+
+                  Gtk.Picture attachment_thumb {
+                    width-request: 48;
+                    height-request: 48;
+                    can-shrink: true;
+                    visible: false;
+                    styles ["zchat-media"]
+                  }
+
+                  Gtk.Image attachment_icon {
+                    pixel-size: 32;
+                    visible: false;
+                  }
+
+                  Gtk.Box {
+                    orientation: vertical;
+                    hexpand: true;
+                    valign: center;
+
+                    Gtk.Label attachment_name {
+                      xalign: 0;
+                      ellipsize: end;
+                      styles ["zchat-sender"]
+                    }
+
+                    Gtk.Label attachment_size {
+                      xalign: 0;
+                      single-line-mode: true;
+                      ellipsize: end;
+                      styles ["dim-label"]
+                    }
+                  }
+
+                  Gtk.Button attachment_cancel {
+                    icon-name: "window-close-symbolic";
+                    tooltip-text: "Remove attachment";
+                    valign: center;
+                    styles ["flat", "circular"]
+                  }
+                }
+
                 Gtk.Box {
                   orientation: horizontal;
                   spacing: 6;
+
+                  Gtk.Button attach_button {
+                    icon-name: "mail-attachment-symbolic";
+                    tooltip-text: "Attach a file";
+                    valign: center;
+                    styles ["flat", "circular"]
+                  }
 
                   Gtk.Entry message_entry {
                     hexpand: true;

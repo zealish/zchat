@@ -65,6 +65,50 @@ func (s *Session) UpdateChat(ctx context.Context, chatJID string, pinned, archiv
 	return out, nil
 }
 
+// maxReadReceipts caps how many messages one MarkRead call acknowledges. The
+// unread counter can be huge after a long absence, and WhatsApp only needs the
+// newest messages to consider the chat read.
+const maxReadReceipts = 50
+
+// MarkRead acknowledges the newest count incoming messages of a chat so the
+// user's phone and the sender both see them as read.
+func (s *Session) MarkRead(ctx context.Context, chatJID string, count int) error {
+	client := s.currentClient()
+	if client == nil || !client.IsLoggedIn() {
+		return nil
+	}
+
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse jid %q: %w", chatJID, err)
+	}
+	if count <= 0 || count > maxReadReceipts {
+		count = maxReadReceipts
+	}
+	refs, err := s.store.RecentIncoming(ctx, chatJID, count)
+	if err != nil {
+		return err
+	}
+
+	// Receipts are per sender, so group the batch by author before sending.
+	bySender := make(map[types.JID][]types.MessageID)
+	for _, ref := range refs {
+		sender, err := types.ParseJID(ref.Sender)
+		if err != nil {
+			continue
+		}
+		bySender[sender.ToNonAD()] = append(bySender[sender.ToNonAD()], types.MessageID(ref.ID))
+	}
+
+	now := time.Now()
+	for sender, ids := range bySender {
+		if err := client.MarkRead(ctx, ids, now, jid, sender); err != nil {
+			return fmt.Errorf("mark read %s: %w", chatJID, err)
+		}
+	}
+	return nil
+}
+
 func muteePatch(jid types.JID, mutedUntil int64) appstate.PatchInfo {
 	switch {
 	case mutedUntil == 0:

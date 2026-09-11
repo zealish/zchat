@@ -433,6 +433,36 @@ func (s *Store) ClearUnread(ctx context.Context, jid string) error {
 	return nil
 }
 
+// MessageRef identifies a message and its author, which is all a read receipt
+// needs.
+type MessageRef struct {
+	ID     string
+	Sender string
+}
+
+// RecentIncoming returns the newest incoming messages of a chat, newest first.
+func (s *Store) RecentIncoming(ctx context.Context, chatJID string, limit int) ([]MessageRef, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, COALESCE(sender, '') FROM messages
+WHERE chat_jid = ? AND outgoing = FALSE
+ORDER BY timestamp DESC
+LIMIT ?`, chatJID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list incoming %s: %w", chatJID, err)
+	}
+	defer rows.Close()
+
+	var refs []MessageRef
+	for rows.Next() {
+		var ref MessageRef
+		if err := rows.Scan(&ref.ID, &ref.Sender); err != nil {
+			return nil, fmt.Errorf("scan incoming message: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
 // InsertMessage stores a message and its attachment, ignoring replays from
 // history sync.
 func (s *Store) InsertMessage(ctx context.Context, m Message) error {

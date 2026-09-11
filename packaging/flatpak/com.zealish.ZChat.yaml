@@ -1,0 +1,44 @@
+app-id: com.zealish.ZChat
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.golang
+command: zchat
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Sending attachments needs read access to the files the user picks.
+  - --filesystem=xdg-download
+  - --filesystem=xdg-pictures
+  - --filesystem=xdg-documents
+  - --talk-name=org.freedesktop.Notifications
+
+build-options:
+  append-path: /usr/lib/sdk/golang/bin
+  env:
+    GOFLAGS: -mod=vendor
+    GOTOOLCHAIN: local
+
+modules:
+  - name: zchat
+    buildsystem: simple
+    build-commands:
+      - make build
+      - install -Dpm 0755 build/zchat /app/bin/zchat
+      - install -Dpm 0755 build/zchat-daemon /app/bin/zchat-daemon
+      - install -Dpm 0644 packaging/com.zealish.ZChat.desktop
+        /app/share/applications/com.zealish.ZChat.desktop
+      - install -Dpm 0644 packaging/com.zealish.ZChat.metainfo.xml
+        /app/share/metainfo/com.zealish.ZChat.metainfo.xml
+      - install -Dpm 0644 packaging/com.zealish.ZChat.svg
+        /app/share/icons/hicolor/scalable/apps/com.zealish.ZChat.svg
+    sources:
+      # Built from the same vendored tarball as the RPM, so the sandbox never
+      # needs network access to fetch Go modules.
+      - type: archive
+        path: ../../dist/zchat-0.3.0.tar.gz
