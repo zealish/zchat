@@ -47,6 +47,10 @@ type window struct {
 	messageEntry *gtk.Entry
 	sendButton   *gtk.Button
 	searchEntry  *gtk.SearchEntry
+	replyBar     *gtk.Box
+	replySender  *gtk.Label
+	replyBody    *gtk.Label
+	replyCancel  *gtk.Button
 
 	chats             *gioutil.ListModel[*zchatv1.Chat]
 	chatSel           *gtk.SingleSelection
@@ -58,7 +62,7 @@ type window struct {
 	searchQuery       string
 	searchResults     []*zchatv1.Chat
 	mediaHandlers     map[*gtk.Button]coreglib.SignalHandle
-	showGroups        bool
+	filter            chatFilter
 	stickToBottom     bool
 	bottomQueued      bool
 	scrollingToBottom bool
@@ -66,7 +70,17 @@ type window struct {
 	client      *client.Client
 	activeChat  string
 	activeGroup bool
+	replyTo     *zchatv1.Message
 }
+
+// chatFilter selects which slice of the chat list the sidebar shows.
+type chatFilter int
+
+const (
+	filterDirect chatFilter = iota
+	filterGroups
+	filterArchived
+)
 
 func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, socketPath string) *window {
 	builder := gtk.NewBuilderFromResource("/com/zealish/ZChat/window.ui")
@@ -89,6 +103,10 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		messageEntry:  builder.GetObject("message_entry").Cast().(*gtk.Entry),
 		sendButton:    builder.GetObject("send_button").Cast().(*gtk.Button),
 		searchEntry:   builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
+		replyBar:      builder.GetObject("reply_bar").Cast().(*gtk.Box),
+		replySender:   builder.GetObject("reply_sender").Cast().(*gtk.Label),
+		replyBody:     builder.GetObject("reply_body").Cast().(*gtk.Label),
+		replyCancel:   builder.GetObject("reply_cancel").Cast().(*gtk.Button),
 		chats:         chatModelType.New(),
 		messages:      messageModelType.New(),
 		chatIndex:     make(map[string]*zchatv1.Chat),
@@ -151,6 +169,8 @@ func (w *window) onEvent(evt *zchatv1.Event) {
 		w.onMessage(payload.MessageReceived, false)
 	case *zchatv1.Event_MessageUpdated:
 		w.onMessage(payload.MessageUpdated, true)
+	case *zchatv1.Event_MessageDeleted:
+		w.onMessageDeleted(payload.MessageDeleted)
 	}
 }
 
@@ -183,23 +203,27 @@ func (w *window) showQR(code string) {
 	w.mainStack.SetVisibleChildName("qr")
 }
 
+// loadChats fetches both the active and archived lists. They are kept in one
+// slice and split by the sidebar filter, so a chat that is archived from
+// another device simply moves between tabs without a refetch.
 func (w *window) loadChats() {
 	if w.client == nil {
 		return
 	}
-	w.client.GetChats(w.ctx, func(chats []*zchatv1.Chat, err error) {
-		if err != nil {
-			w.log.Error().Err(err).Msg("load chats")
-			w.toast("Could not load chats")
-			return
-		}
-		w.chatOrder = chats
-		w.chatIndex = make(map[string]*zchatv1.Chat, len(chats))
-		for _, c := range chats {
-			w.chatIndex[c.GetJid()] = c
-		}
-		w.rebuildChatModel()
-	})
+	w.chatOrder = nil
+	w.chatIndex = make(map[string]*zchatv1.Chat)
+	for _, archived := range []bool{false, true} {
+		w.client.GetChats(w.ctx, archived, func(_ bool, chats []*zchatv1.Chat, err error) {
+			if err != nil {
+				w.log.Error().Err(err).Msg("load chats")
+				w.toast("Could not load chats")
+				return
+			}
+			for _, c := range chats {
+				w.upsertChat(c)
+			}
+		})
+	}
 }
 
 // upsertChat replaces a chat and schedules a sidebar refresh. History sync
@@ -233,8 +257,8 @@ func (w *window) scheduleChatRebuild() {
 }
 
 func (w *window) rebuildChatModel() {
-	// A search shows daemon-ranked results verbatim, ignoring the group filter
-	// so a query never silently hides matches on the other tab.
+	// A search shows daemon-ranked results verbatim, ignoring the sidebar
+	// filter so a query never silently hides matches on another tab.
 	if w.searchQuery != "" {
 		w.chats.Splice(0, w.chats.Len(), w.searchResults...)
 		return
@@ -250,7 +274,7 @@ func (w *window) rebuildChatModel() {
 
 	visible := make([]*zchatv1.Chat, 0, len(w.chatOrder))
 	for _, c := range w.chatOrder {
-		if c.GetIsGroup() == w.showGroups {
+		if w.filterMatches(c) {
 			visible = append(visible, c)
 		}
 	}
@@ -266,6 +290,18 @@ func (w *window) rebuildChatModel() {
 			}
 		}
 	}
+}
+
+// filterMatches reports whether a chat belongs on the currently selected tab.
+// Archived chats are only ever shown on the archived tab.
+func (w *window) filterMatches(chat *zchatv1.Chat) bool {
+	if w.filter == filterArchived {
+		return chat.GetArchived()
+	}
+	if chat.GetArchived() {
+		return false
+	}
+	return chat.GetIsGroup() == (w.filter == filterGroups)
 }
 
 // setupSearch swaps the sidebar between the chat list and daemon-side search
@@ -303,7 +339,14 @@ func (w *window) setupChatList() {
 	w.chatList.SetModel(w.chatSel)
 
 	w.chatFilter.NotifyProperty("active", func() {
-		w.showGroups = w.chatFilter.ActiveName() == "groups"
+		switch w.chatFilter.ActiveName() {
+		case "groups":
+			w.filter = filterGroups
+		case "archived":
+			w.filter = filterArchived
+		default:
+			w.filter = filterDirect
+		}
 		w.rebuildChatModel()
 	})
 
@@ -338,10 +381,24 @@ func (w *window) setupChatList() {
 
 		row.Append(text)
 
+		// Pin and mute markers sit between the preview and the unread badge.
+		markers := gtk.NewLabel("")
+		markers.SetVAlign(gtk.AlignCenter)
+		markers.AddCSSClass("dim-label")
+		row.Append(markers)
+
 		unread := gtk.NewLabel("")
 		unread.SetVAlign(gtk.AlignCenter)
 		unread.AddCSSClass("zchat-unread")
 		row.Append(unread)
+
+		onRightClick(row, func(x, y float64) {
+			chat := chatModelType.ObjectValue(item.Item())
+			if chat == nil {
+				return
+			}
+			showMenu(row, x, y, w.chatMenuEntries(chat))
+		})
 
 		item.SetChild(row)
 	})
@@ -352,7 +409,8 @@ func (w *window) setupChatList() {
 		row := item.Child().(*gtk.Box)
 		avatar := row.FirstChild().(*adw.Avatar)
 		text := avatar.NextSibling().(*gtk.Box)
-		unread := text.NextSibling().(*gtk.Label)
+		markers := text.NextSibling().(*gtk.Label)
+		unread := markers.NextSibling().(*gtk.Label)
 
 		name := text.FirstChild().(*gtk.Label)
 		preview := name.NextSibling().(*gtk.Label)
@@ -361,6 +419,9 @@ func (w *window) setupChatList() {
 		avatar.SetText(display)
 		name.SetText(display)
 		preview.SetText(chat.GetLastMessage())
+
+		markers.SetText(chatMarkers(chat))
+		markers.SetVisible(markers.Text() != "")
 
 		if chat.GetUnread() > 0 {
 			unread.SetText(fmt.Sprintf("%d", chat.GetUnread()))
@@ -377,6 +438,18 @@ func (w *window) setupChatList() {
 		}
 		w.openChat(w.chats.At(int(position)))
 	})
+}
+
+// chatMarkers renders the pinned and muted state as a compact glyph pair.
+func chatMarkers(chat *zchatv1.Chat) string {
+	markers := ""
+	if chat.GetPinned() {
+		markers += "📌"
+	}
+	if isMuted(chat) {
+		markers += "🔕"
+	}
+	return markers
 }
 
 func (w *window) openChat(chat *zchatv1.Chat) {
@@ -436,6 +509,21 @@ func (w *window) onMessage(msg *zchatv1.Message, isUpdate bool) {
 	w.messages.Append(msg)
 	if atBottom {
 		w.scrollToBottom()
+	}
+}
+
+// onMessageDeleted drops a revoked or locally deleted message from the open chat.
+func (w *window) onMessageDeleted(evt *zchatv1.MessageDeleted) {
+	if evt.GetChatJid() != w.activeChat {
+		return
+	}
+	for i := range w.messages.Len() {
+		if w.messages.At(i).GetId() != evt.GetId() {
+			continue
+		}
+		w.messages.Splice(i, 1)
+		delete(w.messageRows, evt.GetId())
+		return
 	}
 }
 
@@ -520,6 +608,32 @@ func (w *window) setupMessageList() {
 		sender.AddCSSClass("zchat-sender")
 		bubble.Append(sender)
 
+		forwarded := gtk.NewLabel("Forwarded")
+		forwarded.SetXAlign(0)
+		forwarded.SetVisible(false)
+		forwarded.AddCSSClass("zchat-forwarded")
+		bubble.Append(forwarded)
+
+		// Quoted block: the replied-to sender above a one-line preview.
+		quoted := gtk.NewBox(gtk.OrientationVertical, 0)
+		quoted.SetVisible(false)
+		quoted.AddCSSClass("zchat-quoted")
+
+		quotedSender := gtk.NewLabel("")
+		quotedSender.SetXAlign(0)
+		quotedSender.SetEllipsize(pango.EllipsizeEnd)
+		quotedSender.AddCSSClass("caption-heading")
+		quoted.Append(quotedSender)
+
+		quotedBody := gtk.NewLabel("")
+		quotedBody.SetXAlign(0)
+		quotedBody.SetSingleLineMode(true)
+		quotedBody.SetEllipsize(pango.EllipsizeEnd)
+		quotedBody.AddCSSClass("dim-label")
+		quoted.Append(quotedBody)
+
+		bubble.Append(quoted)
+
 		// Attachment area: an optional preview above an open/download button.
 		media := gtk.NewBox(gtk.OrientationVertical, 4)
 		media.SetVisible(false)
@@ -554,6 +668,14 @@ func (w *window) setupMessageList() {
 		meta.AddCSSClass("zchat-timestamp")
 		bubble.Append(meta)
 
+		onRightClick(bubble, func(x, y float64) {
+			msg := messageModelType.ObjectValue(item.Item())
+			if msg == nil {
+				return
+			}
+			showMenu(bubble, x, y, w.messageMenuEntries(msg))
+		})
+
 		outer.Append(bubble)
 		item.SetChild(outer)
 	})
@@ -577,13 +699,27 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 	outer := item.Child().(*gtk.Box)
 	bubble := outer.FirstChild().(*gtk.Box)
 	sender := bubble.FirstChild().(*gtk.Label)
-	media := sender.NextSibling().(*gtk.Box)
+	forwarded := sender.NextSibling().(*gtk.Label)
+	quoted := forwarded.NextSibling().(*gtk.Box)
+	media := quoted.NextSibling().(*gtk.Box)
 	body := media.NextSibling().(*gtk.Label)
 	meta := body.NextSibling().(*gtk.Label)
 
 	w.bindMedia(media, msg)
 
 	body.SetText(msg.GetBody())
+	body.SetVisible(msg.GetBody() != "")
+
+	forwarded.SetVisible(msg.GetForwarded())
+
+	if q := msg.GetQuoted(); q != nil {
+		quotedSender := quoted.FirstChild().(*gtk.Label)
+		quotedSender.SetText(quotedSenderName(q))
+		quotedSender.NextSibling().(*gtk.Label).SetText(quotedPreview(q))
+		quoted.SetVisible(true)
+	} else {
+		quoted.SetVisible(false)
+	}
 
 	if msg.GetOutgoing() {
 		bubble.SetHAlign(gtk.AlignEnd)
@@ -735,7 +871,9 @@ func (w *window) setupComposer() {
 			return
 		}
 		w.messageEntry.SetText("")
-		w.client.SendMessage(w.ctx, w.activeChat, body, func(err error) {
+		quotedID := w.replyTo.GetId()
+		w.cancelReply()
+		w.client.SendMessage(w.ctx, w.activeChat, body, quotedID, func(err error) {
 			if err != nil {
 				w.log.Error().Err(err).Msg("send message")
 				w.toast("Message could not be sent")
@@ -745,6 +883,7 @@ func (w *window) setupComposer() {
 
 	w.sendButton.ConnectClicked(send)
 	w.messageEntry.ConnectActivate(send)
+	w.replyCancel.ConnectClicked(w.cancelReply)
 	w.setComposerEnabled(false)
 }
 

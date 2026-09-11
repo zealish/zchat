@@ -8,6 +8,9 @@ service ChatService {
   rpc GetChats(GetChatsRequest) returns (GetChatsResponse);
   rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc ForwardMessage(ForwardMessageRequest) returns (ForwardMessageResponse);
+  rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+  rpc UpdateChat(UpdateChatRequest) returns (UpdateChatResponse);
   rpc GetConnectionState(GetConnectionStateRequest) returns (ConnectionState);
   rpc Logout(LogoutRequest) returns (LogoutResponse);
   rpc DownloadMedia(DownloadMediaRequest) returns (DownloadMediaResponse);
@@ -24,6 +27,7 @@ message Chat {
   string last_message = 6;
   int64 updated_at = 7; // unix seconds
   bool is_group = 8;
+  int64 muted_until = 9; // unix seconds; -1 = muted forever, 0 = not muted
 }
 
 enum MessageStatus {
@@ -46,6 +50,18 @@ message Message {
   bool outgoing = 8;
   MessageStatus status = 9;
   MediaInfo media = 10; // set when type != "text"
+  QuotedMessage quoted = 11; // set when this message replies to another
+  bool forwarded = 12;
+}
+
+// QuotedMessage is the snapshot of the message a reply points at. The original
+// may be missing locally, so the preview text is stored alongside the id.
+message QuotedMessage {
+  string id = 1;
+  string sender = 2;
+  string sender_name = 3;
+  string body = 4;
+  string type = 5;
 }
 
 // MediaInfo describes an attachment. path is empty until the media has been
@@ -80,6 +96,7 @@ message ConnectionState {
 message GetChatsRequest {
   int32 limit = 1;
   int32 offset = 2;
+  bool archived = 3; // return the archived list instead of the active one
 }
 
 message GetChatsResponse {
@@ -99,10 +116,42 @@ message GetMessagesResponse {
 message SendMessageRequest {
   string chat_jid = 1;
   string body = 2;
+  string quoted_message_id = 3; // optional; reply to this message
 }
 
 message SendMessageResponse {
   Message message = 1;
+}
+
+message ForwardMessageRequest {
+  string message_id = 1;
+  string to_chat_jid = 2;
+}
+
+message ForwardMessageResponse {
+  Message message = 1;
+}
+
+// DeleteMessageRequest removes a message locally. When revoke is set and the
+// message is the user's own, it is also revoked for everyone.
+message DeleteMessageRequest {
+  string message_id = 1;
+  bool revoke = 2;
+}
+
+message DeleteMessageResponse {}
+
+// UpdateChatRequest toggles local and app-state chat flags. Unset fields are
+// left untouched.
+message UpdateChatRequest {
+  string chat_jid = 1;
+  optional bool pinned = 2;
+  optional bool archived = 3;
+  optional int64 muted_until = 4; // -1 = mute forever, 0 = unmute
+}
+
+message UpdateChatResponse {
+  Chat chat = 1;
 }
 
 message GetConnectionStateRequest {}
@@ -135,6 +184,11 @@ message QRUpdate {
   int64 expires_at = 2;
 }
 
+message MessageDeleted {
+  string id = 1;
+  string chat_jid = 2;
+}
+
 message Event {
   oneof payload {
     Message message_received = 1;
@@ -142,5 +196,6 @@ message Event {
     Chat chat_updated = 3;
     QRUpdate qr_updated = 4;
     ConnectionState connection_state = 5;
+    MessageDeleted message_deleted = 6;
   }
 }

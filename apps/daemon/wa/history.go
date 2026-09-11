@@ -53,13 +53,14 @@ func (s *Session) processHistorySync(ctx context.Context, evt *events.HistorySyn
 
 		chatJID := jid.ToNonAD().String()
 		chat := daemonstore.Chat{
-			JID:       chatJID,
-			Name:      conv.GetName(),
-			Unread:    int32(conv.GetUnreadCount()),
-			Archived:  conv.GetArchived(),
-			Pinned:    conv.GetPinned() > 0,
-			UpdatedAt: updatedAt,
-			IsGroup:   isGroup,
+			JID:        chatJID,
+			Name:       conv.GetName(),
+			Unread:     int32(conv.GetUnreadCount()),
+			Archived:   conv.GetArchived(),
+			Pinned:     conv.GetPinned() > 0,
+			UpdatedAt:  updatedAt,
+			IsGroup:    isGroup,
+			MutedUntil: muteUntilFrom(conv.GetMuteEndTime() > 0, int64(conv.GetMuteEndTime())),
 		}
 		if chat.Name == "" {
 			chat.Name = s.resolveChatName(ctx, jid, isGroup)

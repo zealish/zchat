@@ -71,14 +71,15 @@ func receiveLoop(stream zchatv1.ChatService_StreamEventsClient, onEvent func(*zc
 	}
 }
 
-// GetChats loads the chat list off the main loop.
-func (c *Client) GetChats(ctx context.Context, onDone func([]*zchatv1.Chat, error)) {
+// GetChats loads a chat list off the main loop. archived selects the archived
+// list instead of the active one.
+func (c *Client) GetChats(ctx context.Context, archived bool, onDone func(bool, []*zchatv1.Chat, error)) {
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 		defer cancel()
 
-		resp, err := c.svc.GetChats(callCtx, &zchatv1.GetChatsRequest{})
-		idle(func() { onDone(resp.GetChats(), err) })
+		resp, err := c.svc.GetChats(callCtx, &zchatv1.GetChatsRequest{Archived: archived})
+		idle(func() { onDone(archived, resp.GetChats(), err) })
 	}()
 }
 
@@ -93,13 +94,64 @@ func (c *Client) GetMessages(ctx context.Context, chatJID string, onDone func(st
 	}()
 }
 
-// SendMessage sends text off the main loop.
-func (c *Client) SendMessage(ctx context.Context, chatJID, body string, onDone func(error)) {
+// SendMessage sends text off the main loop. quotedID, when set, makes the
+// message a reply.
+func (c *Client) SendMessage(ctx context.Context, chatJID, body, quotedID string, onDone func(error)) {
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 		defer cancel()
 
-		_, err := c.svc.SendMessage(callCtx, &zchatv1.SendMessageRequest{ChatJid: chatJID, Body: body})
+		_, err := c.svc.SendMessage(callCtx, &zchatv1.SendMessageRequest{
+			ChatJid:         chatJID,
+			Body:            body,
+			QuotedMessageId: quotedID,
+		})
+		idle(func() { onDone(err) })
+	}()
+}
+
+// ForwardMessage re-sends a message to another chat off the main loop.
+func (c *Client) ForwardMessage(ctx context.Context, messageID, toChatJID string, onDone func(error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+
+		_, err := c.svc.ForwardMessage(callCtx, &zchatv1.ForwardMessageRequest{
+			MessageId: messageID,
+			ToChatJid: toChatJID,
+		})
+		idle(func() { onDone(err) })
+	}()
+}
+
+// DeleteMessage removes a message off the main loop, revoking it for everyone
+// when revoke is set.
+func (c *Client) DeleteMessage(ctx context.Context, messageID string, revoke bool, onDone func(error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+
+		_, err := c.svc.DeleteMessage(callCtx, &zchatv1.DeleteMessageRequest{
+			MessageId: messageID,
+			Revoke:    revoke,
+		})
+		idle(func() { onDone(err) })
+	}()
+}
+
+// UpdateChat toggles chat flags off the main loop. Nil fields are left
+// untouched by the daemon.
+func (c *Client) UpdateChat(ctx context.Context, chatJID string, pinned, archived *bool, mutedUntil *int64, onDone func(error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+
+		_, err := c.svc.UpdateChat(callCtx, &zchatv1.UpdateChatRequest{
+			ChatJid:    chatJID,
+			Pinned:     pinned,
+			Archived:   archived,
+			MutedUntil: mutedUntil,
+		})
 		idle(func() { onDone(err) })
 	}()
 }

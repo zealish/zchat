@@ -32,7 +32,8 @@ func New(log zerolog.Logger, st *store.Store, session *wa.Session, broker *Broke
 	return &Service{log: log, store: st, session: session, broker: broker}
 }
 
-// GetChats returns a page of conversations.
+// GetChats returns a page of conversations. Archived chats are a separate list
+// and are only returned when explicitly requested.
 func (s *Service) GetChats(ctx context.Context, req *zchatv1.GetChatsRequest) (*zchatv1.GetChatsResponse, error) {
 	limit := int(req.GetLimit())
 	if limit <= 0 || limit > maxPageSize {
@@ -43,7 +44,7 @@ func (s *Service) GetChats(ctx context.Context, req *zchatv1.GetChatsRequest) (*
 		offset = 0
 	}
 
-	chats, err := s.store.ListChats(ctx, limit, offset)
+	chats, err := s.store.ListChats(ctx, limit, offset, req.GetArchived())
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -138,7 +139,7 @@ func (s *Service) GetMessages(ctx context.Context, req *zchatv1.GetMessagesReque
 	return resp, nil
 }
 
-// SendMessage sends a text message to a chat.
+// SendMessage sends a text message to a chat, optionally as a reply.
 func (s *Service) SendMessage(ctx context.Context, req *zchatv1.SendMessageRequest) (*zchatv1.SendMessageResponse, error) {
 	if req.GetChatJid() == "" {
 		return nil, status.Error(codes.InvalidArgument, "chat_jid is required")
@@ -147,11 +148,67 @@ func (s *Service) SendMessage(ctx context.Context, req *zchatv1.SendMessageReque
 		return nil, status.Error(codes.InvalidArgument, "body is required")
 	}
 
-	msg, err := s.session.SendText(ctx, req.GetChatJid(), req.GetBody())
+	msg, err := s.session.SendText(ctx, req.GetChatJid(), req.GetBody(), req.GetQuotedMessageId())
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "quoted message not found")
+		}
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	return &zchatv1.SendMessageResponse{Message: msg}, nil
+}
+
+// ForwardMessage re-sends an existing message to another chat.
+func (s *Service) ForwardMessage(ctx context.Context, req *zchatv1.ForwardMessageRequest) (*zchatv1.ForwardMessageResponse, error) {
+	if req.GetMessageId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "message_id is required")
+	}
+	if req.GetToChatJid() == "" {
+		return nil, status.Error(codes.InvalidArgument, "to_chat_jid is required")
+	}
+
+	msg, err := s.session.ForwardMessage(ctx, req.GetMessageId(), req.GetToChatJid())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "message not found")
+		}
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.ForwardMessageResponse{Message: msg}, nil
+}
+
+// DeleteMessage removes a message locally, and for everyone when requested.
+func (s *Service) DeleteMessage(ctx context.Context, req *zchatv1.DeleteMessageRequest) (*zchatv1.DeleteMessageResponse, error) {
+	if req.GetMessageId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "message_id is required")
+	}
+
+	if _, err := s.session.DeleteMessage(ctx, req.GetMessageId(), req.GetRevoke()); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "message not found")
+		}
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.DeleteMessageResponse{}, nil
+}
+
+// UpdateChat toggles a chat's pinned, archived and muted flags.
+func (s *Service) UpdateChat(ctx context.Context, req *zchatv1.UpdateChatRequest) (*zchatv1.UpdateChatResponse, error) {
+	if req.GetChatJid() == "" {
+		return nil, status.Error(codes.InvalidArgument, "chat_jid is required")
+	}
+	if req.Pinned == nil && req.Archived == nil && req.MutedUntil == nil {
+		return nil, status.Error(codes.InvalidArgument, "no fields to update")
+	}
+
+	chat, err := s.session.UpdateChat(ctx, req.GetChatJid(), req.Pinned, req.Archived, req.MutedUntil)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "chat not found")
+		}
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	return &zchatv1.UpdateChatResponse{Chat: chat}, nil
 }
 
 // GetConnectionState reports the current WhatsApp connection state.

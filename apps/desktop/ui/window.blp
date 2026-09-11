@@ -67,6 +67,11 @@ Adw.ApplicationWindow window {
                     name: "groups";
                     label: "Groups";
                   }
+
+                  Adw.Toggle {
+                    name: "archived";
+                    label: "Archived";
+                  }
                 }
               }
 
@@ -99,22 +104,59 @@ Adw.ApplicationWindow window {
 
               [bottom]
               Gtk.Box {
-                orientation: horizontal;
+                orientation: vertical;
                 spacing: 6;
                 margin-start: 12;
                 margin-end: 12;
                 margin-top: 6;
                 margin-bottom: 12;
 
-                Gtk.Entry message_entry {
-                  hexpand: true;
-                  placeholder-text: "Write a message";
+                Gtk.Box reply_bar {
+                  orientation: horizontal;
+                  spacing: 6;
+                  visible: false;
+                  styles ["zchat-reply-bar"]
+
+                  Gtk.Box {
+                    orientation: vertical;
+                    hexpand: true;
+
+                    Gtk.Label reply_sender {
+                      xalign: 0;
+                      ellipsize: end;
+                      styles ["zchat-sender"]
+                    }
+
+                    Gtk.Label reply_body {
+                      xalign: 0;
+                      single-line-mode: true;
+                      ellipsize: end;
+                      styles ["dim-label"]
+                    }
+                  }
+
+                  Gtk.Button reply_cancel {
+                    icon-name: "window-close-symbolic";
+                    tooltip-text: "Cancel reply";
+                    valign: center;
+                    styles ["flat", "circular"]
+                  }
                 }
 
-                Gtk.Button send_button {
-                  icon-name: "document-send-symbolic";
-                  tooltip-text: "Send";
-                  styles ["suggested-action", "circular"]
+                Gtk.Box {
+                  orientation: horizontal;
+                  spacing: 6;
+
+                  Gtk.Entry message_entry {
+                    hexpand: true;
+                    placeholder-text: "Write a message";
+                  }
+
+                  Gtk.Button send_button {
+                    icon-name: "document-send-symbolic";
+                    tooltip-text: "Send";
+                    styles ["suggested-action", "circular"]
+                  }
                 }
               }
             };

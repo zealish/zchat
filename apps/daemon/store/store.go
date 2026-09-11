@@ -43,9 +43,13 @@ type Chat struct {
 	LastMessage string
 	UpdatedAt   int64
 	IsGroup     bool
+	// MutedUntil is a unix timestamp, -1 for muted indefinitely and 0 for not
+	// muted.
+	MutedUntil int64
 }
 
-// Message is a single message row. Media is nil for plain text.
+// Message is a single message row. Media is nil for plain text, Quoted is nil
+// unless the message is a reply.
 type Message struct {
 	ID         string
 	ChatJID    string
@@ -56,7 +60,19 @@ type Message struct {
 	Timestamp  int64
 	Outgoing   bool
 	Status     string
+	Forwarded  bool
 	Media      *Media
+	Quoted     *Quoted
+}
+
+// Quoted is the snapshot of the message a reply points at. The original is not
+// necessarily stored locally, so its preview travels with the reply.
+type Quoted struct {
+	ID         string
+	Sender     string
+	SenderName string
+	Body       string
+	Type       string
 }
 
 // Media is an attachment belonging to a message. Payload holds the serialised
@@ -90,7 +106,8 @@ CREATE TABLE IF NOT EXISTS chats (
     pinned BOOLEAN DEFAULT FALSE,
     last_message TEXT,
     updated_at INTEGER,
-    is_group BOOLEAN DEFAULT FALSE
+    is_group BOOLEAN DEFAULT FALSE,
+    muted_until INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
@@ -101,7 +118,13 @@ CREATE TABLE IF NOT EXISTS messages (
     type TEXT,
     timestamp INTEGER,
     outgoing BOOLEAN,
-    status TEXT
+    status TEXT,
+    forwarded BOOLEAN DEFAULT FALSE,
+    quoted_id TEXT,
+    quoted_sender TEXT,
+    quoted_sender_name TEXT,
+    quoted_body TEXT,
+    quoted_type TEXT
 );
 CREATE TABLE IF NOT EXISTS media (
     id TEXT PRIMARY KEY,
@@ -137,30 +160,46 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := migrateMedia(ctx, db); err != nil {
-		db.Close()
-		return nil, err
+	for table, cols := range addedColumns {
+		if err := migrateColumns(ctx, db, table, cols); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	return &Store{db: db}, nil
 }
 
-// mediaColumns are the v0.2 additions to the v0.1 media table. Databases
-// created before v0.2 already have the table, so CREATE TABLE IF NOT EXISTS
-// alone would leave them without these columns.
-var mediaColumns = []struct{ name, decl string }{
-	{"filename", "TEXT"},
-	{"caption", "TEXT"},
-	{"thumbnail", "BLOB"},
-	{"width", "INTEGER"},
-	{"height", "INTEGER"},
-	{"duration", "INTEGER"},
-	{"payload", "BLOB"},
+// addedColumns lists columns added after a table's first release. Existing
+// databases already have the table, so CREATE TABLE IF NOT EXISTS alone would
+// leave them without these columns.
+var addedColumns = map[string][]struct{ name, decl string }{
+	"media": {
+		{"filename", "TEXT"},
+		{"caption", "TEXT"},
+		{"thumbnail", "BLOB"},
+		{"width", "INTEGER"},
+		{"height", "INTEGER"},
+		{"duration", "INTEGER"},
+		{"payload", "BLOB"},
+	},
+	"chats": {
+		{"muted_until", "INTEGER DEFAULT 0"},
+	},
+	"messages": {
+		{"forwarded", "BOOLEAN DEFAULT FALSE"},
+		{"quoted_id", "TEXT"},
+		{"quoted_sender", "TEXT"},
+		{"quoted_sender_name", "TEXT"},
+		{"quoted_body", "TEXT"},
+		{"quoted_type", "TEXT"},
+	},
 }
 
-func migrateMedia(ctx context.Context, db *sql.DB) error {
-	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info('media')`)
+func migrateColumns(ctx context.Context, db *sql.DB, table string, cols []struct{ name, decl string }) error {
+	// The table name comes from the fixed map above, never from user input.
+	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
-		return fmt.Errorf("inspect media table: %w", err)
+		return fmt.Errorf("inspect %s table: %w", table, err)
 	}
 	defer rows.Close()
 
@@ -168,7 +207,7 @@ func migrateMedia(ctx context.Context, db *sql.DB) error {
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return fmt.Errorf("scan media column: %w", err)
+			return fmt.Errorf("scan %s column: %w", table, err)
 		}
 		existing[name] = true
 	}
@@ -176,13 +215,13 @@ func migrateMedia(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 
-	for _, col := range mediaColumns {
+	for _, col := range cols {
 		if existing[col.name] {
 			continue
 		}
 		// Column names come from the fixed list above, never from user input.
-		if _, err := db.ExecContext(ctx, `ALTER TABLE media ADD COLUMN `+col.name+` `+col.decl); err != nil {
-			return fmt.Errorf("add media column %s: %w", col.name, err)
+		if _, err := db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+col.name+` `+col.decl); err != nil {
+			return fmt.Errorf("add %s column %s: %w", table, col.name, err)
 		}
 	}
 	return nil
@@ -194,12 +233,29 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Close releases the database.
 func (s *Store) Close() error { return s.db.Close() }
 
+// chatColumns selects every chat field in the order scanChat expects.
+const chatColumns = `
+SELECT jid, name, unread, archived, pinned, COALESCE(last_message, ''), COALESCE(updated_at, 0),
+       is_group, COALESCE(muted_until, 0)
+FROM chats`
+
+// realChatFilter excludes newsletters, broadcast lists and status updates. Rows
+// for them may exist from before they were filtered on ingest.
+const realChatFilter = `(jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@c.us' OR jid LIKE '%@lid' OR jid LIKE '%@g.us')`
+
+func scanChat(sc interface{ Scan(...any) error }) (Chat, error) {
+	var c Chat
+	err := sc.Scan(&c.JID, &c.Name, &c.Unread, &c.Archived, &c.Pinned, &c.LastMessage,
+		&c.UpdatedAt, &c.IsGroup, &c.MutedUntil)
+	return c, err
+}
+
 // UpsertChat inserts or updates a chat, preserving an existing name when the
 // incoming one is empty.
 func (s *Store) UpsertChat(ctx context.Context, c Chat) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO chats (jid, name, unread, archived, pinned, last_message, updated_at, is_group)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO chats (jid, name, unread, archived, pinned, last_message, updated_at, is_group, muted_until)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(jid) DO UPDATE SET
     name = CASE WHEN excluded.name != '' THEN excluded.name ELSE chats.name END,
     unread = excluded.unread,
@@ -207,8 +263,9 @@ ON CONFLICT(jid) DO UPDATE SET
     pinned = excluded.pinned,
     last_message = CASE WHEN excluded.last_message != '' THEN excluded.last_message ELSE chats.last_message END,
     updated_at = MAX(excluded.updated_at, chats.updated_at),
-    is_group = excluded.is_group`,
-		c.JID, c.Name, c.Unread, c.Archived, c.Pinned, c.LastMessage, c.UpdatedAt, c.IsGroup)
+    is_group = excluded.is_group,
+    muted_until = excluded.muted_until`,
+		c.JID, c.Name, c.Unread, c.Archived, c.Pinned, c.LastMessage, c.UpdatedAt, c.IsGroup, c.MutedUntil)
 	if err != nil {
 		return fmt.Errorf("upsert chat %s: %w", c.JID, err)
 	}
@@ -216,15 +273,13 @@ ON CONFLICT(jid) DO UPDATE SET
 }
 
 // ListChats returns regular direct and group chats, ordered pinned first, then
-// most recently updated. Newsletters, broadcast lists and status updates are
-// excluded; rows for them may exist from before they were filtered on ingest.
-func (s *Store) ListChats(ctx context.Context, limit, offset int) ([]Chat, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT jid, name, unread, archived, pinned, COALESCE(last_message, ''), COALESCE(updated_at, 0), is_group
-FROM chats
-WHERE jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@c.us' OR jid LIKE '%@lid' OR jid LIKE '%@g.us'
+// most recently updated. Archived chats live on their own list, so archived
+// selects which of the two is returned.
+func (s *Store) ListChats(ctx context.Context, limit, offset int, archived bool) ([]Chat, error) {
+	rows, err := s.db.QueryContext(ctx, chatColumns+`
+WHERE `+realChatFilter+` AND archived = ?
 ORDER BY pinned DESC, updated_at DESC
-LIMIT ? OFFSET ?`, limit, offset)
+LIMIT ? OFFSET ?`, archived, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list chats: %w", err)
 	}
@@ -232,8 +287,8 @@ LIMIT ? OFFSET ?`, limit, offset)
 
 	var chats []Chat
 	for rows.Next() {
-		var c Chat
-		if err := rows.Scan(&c.JID, &c.Name, &c.Unread, &c.Archived, &c.Pinned, &c.LastMessage, &c.UpdatedAt, &c.IsGroup); err != nil {
+		c, err := scanChat(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan chat: %w", err)
 		}
 		chats = append(chats, c)
@@ -241,13 +296,46 @@ LIMIT ? OFFSET ?`, limit, offset)
 	return chats, rows.Err()
 }
 
+// SetChatFlags updates a chat's pinned, archived and muted state. Nil fields
+// are left untouched.
+func (s *Store) SetChatFlags(ctx context.Context, jid string, pinned, archived *bool, mutedUntil *int64) error {
+	sets := make([]string, 0, 3)
+	args := make([]any, 0, 4)
+	if pinned != nil {
+		sets = append(sets, "pinned = ?")
+		args = append(args, *pinned)
+	}
+	if archived != nil {
+		sets = append(sets, "archived = ?")
+		args = append(args, *archived)
+		// WhatsApp unpins a chat when it is archived.
+		if *archived {
+			sets = append(sets, "pinned = FALSE")
+		}
+	}
+	if mutedUntil != nil {
+		sets = append(sets, "muted_until = ?")
+		args = append(args, *mutedUntil)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+
+	args = append(args, jid)
+	// Every fragment above is a fixed literal; only values are parameterised.
+	res, err := s.db.ExecContext(ctx, `UPDATE chats SET `+strings.Join(sets, ", ")+` WHERE jid = ?`, args...)
+	if err != nil {
+		return fmt.Errorf("set chat flags %s: %w", jid, err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GetChat loads a single chat.
 func (s *Store) GetChat(ctx context.Context, jid string) (Chat, error) {
-	var c Chat
-	err := s.db.QueryRowContext(ctx, `
-SELECT jid, name, unread, archived, pinned, COALESCE(last_message, ''), COALESCE(updated_at, 0), is_group
-FROM chats WHERE jid = ?`, jid).
-		Scan(&c.JID, &c.Name, &c.Unread, &c.Archived, &c.Pinned, &c.LastMessage, &c.UpdatedAt, &c.IsGroup)
+	c, err := scanChat(s.db.QueryRowContext(ctx, chatColumns+` WHERE jid = ?`, jid))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Chat{}, ErrNotFound
 	}
@@ -365,8 +453,9 @@ type execer interface {
 }
 
 const insertMessageSQL = `
-INSERT INTO messages (id, chat_jid, sender, sender_name, body, type, timestamp, outgoing, status)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO messages (id, chat_jid, sender, sender_name, body, type, timestamp, outgoing, status,
+                      forwarded, quoted_id, quoted_sender, quoted_sender_name, quoted_body, quoted_type)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING`
 
 const insertMediaSQL = `
@@ -375,8 +464,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING`
 
 func insertMessageTx(ctx context.Context, ex execer, m Message) error {
+	q := m.Quoted
+	if q == nil {
+		q = &Quoted{}
+	}
 	if _, err := ex.ExecContext(ctx, insertMessageSQL,
-		m.ID, m.ChatJID, m.Sender, m.SenderName, m.Body, m.Type, m.Timestamp, m.Outgoing, m.Status); err != nil {
+		m.ID, m.ChatJID, m.Sender, m.SenderName, m.Body, m.Type, m.Timestamp, m.Outgoing, m.Status,
+		m.Forwarded, q.ID, q.Sender, q.SenderName, q.Body, q.Type); err != nil {
 		return fmt.Errorf("insert message %s: %w", m.ID, err)
 	}
 	if m.Media == nil {
@@ -411,10 +505,13 @@ func (s *Store) InsertMessages(ctx context.Context, msgs []Message) error {
 	return tx.Commit()
 }
 
-// messageColumns selects a message with its optional attachment.
+// messageColumns selects a message with its optional attachment and reply
+// context.
 const messageColumns = `
 SELECT m.id, m.chat_jid, COALESCE(m.sender, ''), COALESCE(m.sender_name, ''), COALESCE(m.body, ''),
        COALESCE(m.type, ''), COALESCE(m.timestamp, 0), m.outgoing, COALESCE(m.status, ''),
+       COALESCE(m.forwarded, FALSE), COALESCE(m.quoted_id, ''), COALESCE(m.quoted_sender, ''),
+       COALESCE(m.quoted_sender_name, ''), COALESCE(m.quoted_body, ''), COALESCE(m.quoted_type, ''),
        md.id IS NOT NULL, COALESCE(md.path, ''), COALESCE(md.mime, ''), COALESCE(md.size, 0),
        COALESCE(md.filename, ''), COALESCE(md.caption, ''), md.thumbnail,
        COALESCE(md.width, 0), COALESCE(md.height, 0), COALESCE(md.duration, 0)
@@ -425,10 +522,12 @@ func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
 	var (
 		m        Message
 		md       Media
+		q        Quoted
 		hasMedia bool
 	)
 	err := sc.Scan(&m.ID, &m.ChatJID, &m.Sender, &m.SenderName, &m.Body, &m.Type, &m.Timestamp,
-		&m.Outgoing, &m.Status, &hasMedia, &md.Path, &md.Mime, &md.Size, &md.Filename,
+		&m.Outgoing, &m.Status, &m.Forwarded, &q.ID, &q.Sender, &q.SenderName, &q.Body, &q.Type,
+		&hasMedia, &md.Path, &md.Mime, &md.Size, &md.Filename,
 		&md.Caption, &md.Thumbnail, &md.Width, &md.Height, &md.Duration)
 	if err != nil {
 		return Message{}, err
@@ -436,6 +535,9 @@ func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
 	if hasMedia {
 		md.MessageID = m.ID
 		m.Media = &md
+	}
+	if q.ID != "" {
+		m.Quoted = &q
 	}
 	return m, nil
 }
@@ -482,6 +584,28 @@ func (s *Store) GetMessage(ctx context.Context, id string) (Message, error) {
 	return m, nil
 }
 
+// DeleteMessage removes a message and its attachment row. The downloaded file
+// itself is left on disk; the media directory is cleaned up separately.
+func (s *Store) DeleteMessage(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete %s: %w", id, err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM media WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete media %s: %w", id, err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete message %s: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 // MediaPayload returns the stored waE2E payload needed to decrypt a message's
 // attachment, plus the local path when it was already downloaded.
 func (s *Store) MediaPayload(ctx context.Context, messageID string) (payload []byte, path string, err error) {
@@ -508,14 +632,13 @@ func (s *Store) SetMediaPath(ctx context.Context, messageID, path string, size i
 	return nil
 }
 
-// SearchChats returns chats whose name or last message matches query.
+// SearchChats returns chats whose name or last message matches query. Both
+// active and archived chats are searched.
 func (s *Store) SearchChats(ctx context.Context, query string, limit int) ([]Chat, error) {
 	// LIKE with an escaped pattern keeps the caller's wildcards literal.
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := s.db.QueryContext(ctx, `
-SELECT jid, name, unread, archived, pinned, COALESCE(last_message, ''), COALESCE(updated_at, 0), is_group
-FROM chats
-WHERE (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@c.us' OR jid LIKE '%@lid' OR jid LIKE '%@g.us')
+	rows, err := s.db.QueryContext(ctx, chatColumns+`
+WHERE `+realChatFilter+`
   AND (name LIKE ? ESCAPE '\' OR COALESCE(last_message, '') LIKE ? ESCAPE '\')
 ORDER BY pinned DESC, updated_at DESC
 LIMIT ?`, pattern, pattern, limit)
@@ -526,8 +649,8 @@ LIMIT ?`, pattern, pattern, limit)
 
 	var chats []Chat
 	for rows.Next() {
-		var c Chat
-		if err := rows.Scan(&c.JID, &c.Name, &c.Unread, &c.Archived, &c.Pinned, &c.LastMessage, &c.UpdatedAt, &c.IsGroup); err != nil {
+		c, err := scanChat(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan chat: %w", err)
 		}
 		chats = append(chats, c)
@@ -575,6 +698,17 @@ func (s *Store) UpdateMessageTimestamp(ctx context.Context, id string, ts int64)
 	_, err := s.db.ExecContext(ctx, `UPDATE messages SET timestamp = ? WHERE id = ?`, ts, id)
 	if err != nil {
 		return fmt.Errorf("update timestamp %s: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateMessageSender records the identity a message was actually sent with.
+// Outgoing rows are written before the send completes, when the phone-number
+// JID is only a guess: LID-addressed chats and groups send under the LID.
+func (s *Store) UpdateMessageSender(ctx context.Context, id, sender string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE messages SET sender = ? WHERE id = ?`, sender, id)
+	if err != nil {
+		return fmt.Errorf("update sender %s: %w", id, err)
 	}
 	return nil
 }

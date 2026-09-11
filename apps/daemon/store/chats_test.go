@@ -16,7 +16,7 @@ func TestListChatsOrdersPinnedThenRecent(t *testing.T) {
 		}
 	}
 
-	got, err := s.ListChats(ctx, 10, 0)
+	got, err := s.ListChats(ctx, 10, 0, false)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -28,6 +28,54 @@ func TestListChatsOrdersPinnedThenRecent(t *testing.T) {
 		if got[i].JID != jid {
 			t.Fatalf("position %d: want %s, got %s", i, jid, got[i].JID)
 		}
+	}
+}
+
+func TestSetChatFlagsMovesChatToArchive(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	if err := s.UpsertChat(ctx, Chat{JID: "a@s.whatsapp.net", Name: "Alice", UpdatedAt: 100, Pinned: true}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	archived := true
+	if err := s.SetChatFlags(ctx, "a@s.whatsapp.net", nil, &archived, nil); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	active, err := s.ListChats(ctx, 10, 0, false)
+	if err != nil {
+		t.Fatalf("list active: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("want no active chats, got %d", len(active))
+	}
+
+	stored, err := s.GetChat(ctx, "a@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("get chat: %v", err)
+	}
+	// Archiving unpins, matching WhatsApp's own behaviour.
+	if !stored.Archived || stored.Pinned {
+		t.Fatalf("want archived and unpinned, got %+v", stored)
+	}
+
+	muted := int64(-1)
+	if err := s.SetChatFlags(ctx, "a@s.whatsapp.net", nil, nil, &muted); err != nil {
+		t.Fatalf("mute: %v", err)
+	}
+	stored, _ = s.GetChat(ctx, "a@s.whatsapp.net")
+	if stored.MutedUntil != -1 {
+		t.Fatalf("want muted_until -1, got %d", stored.MutedUntil)
+	}
+}
+
+func TestSetChatFlagsUnknownChat(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	pinned := true
+	if err := s.SetChatFlags(ctx, "ghost@s.whatsapp.net", &pinned, nil, nil); err != ErrNotFound {
+		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
 

@@ -215,6 +215,17 @@ func (s *Session) handleEvent(evt any) {
 			s.log.Warn().Msg("history sync queue full, processing inline")
 			s.processHistorySync(ctx, e)
 		}
+	case *events.Pin:
+		pinned := e.Action.GetPinned()
+		s.onAppStateChat(ctx, e.JID, &pinned, nil, nil)
+	case *events.Archive:
+		archived := e.Action.GetArchived()
+		s.onAppStateChat(ctx, e.JID, nil, &archived, nil)
+	case *events.Mute:
+		muted := muteUntilFrom(e.Action.GetMuted(), e.Action.GetMuteEndTimestamp())
+		s.onAppStateChat(ctx, e.JID, nil, nil, &muted)
+	case *events.DeleteForMe:
+		s.onDeleteForMe(ctx, e)
 	case *events.OfflineSyncCompleted:
 		s.log.Info().Int("count", e.Count).Msg("offline sync completed")
 	}
@@ -272,12 +283,31 @@ func (s *Session) onMessage(ctx context.Context, e *events.Message) {
 	if !supportedChat(e.Info.Chat) {
 		return
 	}
+	// A revoke arrives as a regular message carrying a protocol payload; it
+	// removes the target message rather than adding one. REVOKE is the zero
+	// value of the type enum, so the payload itself must be checked first.
+	if protoMsg := e.Message.GetProtocolMessage(); protoMsg != nil && protoMsg.GetType() == waE2E.ProtocolMessage_REVOKE {
+		s.onRevoke(ctx, e.Info.Chat, protoMsg.GetKey().GetID())
+		return
+	}
 	msg, ok := s.persistMessage(ctx, e.Info, e.Message)
 	if !ok {
 		return
 	}
 	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageReceived{MessageReceived: msg}})
 	s.publishChat(ctx, msg.GetChatJid())
+}
+
+// muteUntilFrom converts WhatsApp's mute end timestamp (milliseconds, 0 for
+// indefinite) into the store's representation.
+func muteUntilFrom(muted bool, endTimestampMS int64) int64 {
+	if !muted {
+		return 0
+	}
+	if endTimestampMS <= 0 {
+		return MuteForever
+	}
+	return endTimestampMS / 1000
 }
 
 // supportedChat reports whether a chat is a regular direct or group
@@ -344,6 +374,7 @@ func (s *Session) messageRow(ctx context.Context, info types.MessageInfo, msg *w
 		senderName = s.contactName(ctx, info.Sender)
 	}
 
+	ctxInfo := messageContext(msg)
 	return daemonstore.Message{
 		ID:         info.ID,
 		ChatJID:    info.Chat.ToNonAD().String(),
@@ -354,8 +385,62 @@ func (s *Session) messageRow(ctx context.Context, info types.MessageInfo, msg *w
 		Timestamp:  info.Timestamp.Unix(),
 		Outgoing:   info.IsFromMe,
 		Status:     status,
+		Forwarded:  ctxInfo.GetIsForwarded(),
 		Media:      media,
+		Quoted:     s.quotedFrom(ctx, ctxInfo),
 	}, true
+}
+
+// messageContext returns whichever ContextInfo the message carries, or nil.
+func messageContext(msg *waE2E.Message) *waE2E.ContextInfo {
+	switch {
+	case msg.GetExtendedTextMessage() != nil:
+		return msg.GetExtendedTextMessage().GetContextInfo()
+	case msg.GetImageMessage() != nil:
+		return msg.GetImageMessage().GetContextInfo()
+	case msg.GetVideoMessage() != nil:
+		return msg.GetVideoMessage().GetContextInfo()
+	case msg.GetAudioMessage() != nil:
+		return msg.GetAudioMessage().GetContextInfo()
+	case msg.GetDocumentMessage() != nil:
+		return msg.GetDocumentMessage().GetContextInfo()
+	case msg.GetStickerMessage() != nil:
+		return msg.GetStickerMessage().GetContextInfo()
+	default:
+		return nil
+	}
+}
+
+// quotedFrom builds the reply snapshot from a message's context, or nil when
+// the message is not a reply.
+func (s *Session) quotedFrom(ctx context.Context, info *waE2E.ContextInfo) *daemonstore.Quoted {
+	if info.GetStanzaID() == "" {
+		return nil
+	}
+
+	quotedMsg := info.GetQuotedMessage()
+	body := extractText(quotedMsg)
+	kind, media := extractMedia(quotedMsg)
+	if media == nil {
+		kind = TypeText
+	} else if body == "" {
+		body = mediaPreview(kind, media)
+	}
+
+	sender := info.GetParticipant()
+	senderName := ""
+	if jid, err := types.ParseJID(sender); err == nil {
+		sender = jid.ToNonAD().String()
+		senderName = s.contactName(ctx, jid)
+	}
+
+	return &daemonstore.Quoted{
+		ID:         info.GetStanzaID(),
+		Sender:     sender,
+		SenderName: senderName,
+		Body:       body,
+		Type:       kind,
+	}
 }
 
 // persistMessage stores a live message and updates its chat row.
@@ -470,7 +555,8 @@ func (s *Session) publishChat(ctx context.Context, chatJID string) {
 }
 
 // SendText sends a text message, recording an optimistic pending row first.
-func (s *Session) SendText(ctx context.Context, chatJID, body string) (*zchatv1.Message, error) {
+// quotedID, when set, turns the message into a reply to that message.
+func (s *Session) SendText(ctx context.Context, chatJID, body, quotedID string) (*zchatv1.Message, error) {
 	client := s.currentClient()
 	if client == nil {
 		return nil, errors.New("session not started")
@@ -479,6 +565,15 @@ func (s *Session) SendText(ctx context.Context, chatJID, body string) (*zchatv1.
 	jid, err := types.ParseJID(chatJID)
 	if err != nil {
 		return nil, fmt.Errorf("parse jid %q: %w", chatJID, err)
+	}
+
+	payload := &waE2E.Message{Conversation: proto.String(body)}
+	var quoted *daemonstore.Quoted
+	if quotedID != "" {
+		quoted, payload, err = s.buildReply(ctx, jid, body, quotedID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	id := client.GenerateMessageID()
@@ -492,18 +587,18 @@ func (s *Session) SendText(ctx context.Context, chatJID, body string) (*zchatv1.
 		Sender:     sender,
 		SenderName: pushNameOf(client.Store),
 		Body:       body,
-		Type:       "text",
+		Type:       TypeText,
 		Timestamp:  time.Now().Unix(),
 		Outgoing:   true,
 		Status:     daemonstore.StatusPending,
+		Quoted:     quoted,
 	}
 	if err := s.store.InsertMessage(ctx, row); err != nil {
 		return nil, err
 	}
 	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageReceived{MessageReceived: toProtoMessage(row)}})
 
-	resp, sendErr := client.SendMessage(ctx, jid, &waE2E.Message{Conversation: proto.String(body)},
-		whatsmeow.SendRequestExtra{ID: id})
+	resp, sendErr := client.SendMessage(ctx, jid, payload, whatsmeow.SendRequestExtra{ID: id})
 	if sendErr != nil {
 		if err := s.store.UpdateMessageStatus(ctx, id, daemonstore.StatusFailed); err != nil {
 			s.log.Warn().Err(err).Msg("mark message failed")
@@ -513,24 +608,97 @@ func (s *Session) SendText(ctx context.Context, chatJID, body string) (*zchatv1.
 		return nil, fmt.Errorf("send message: %w", sendErr)
 	}
 
-	row.Timestamp = resp.Timestamp.Unix()
-	row.Status = daemonstore.StatusSent
-	if err := s.store.UpdateMessageTimestamp(ctx, id, row.Timestamp); err != nil {
-		s.log.Warn().Err(err).Msg("update sent timestamp")
-	}
-	if err := s.store.UpdateMessageStatus(ctx, id, daemonstore.StatusSent); err != nil {
-		s.log.Warn().Err(err).Msg("mark message sent")
-	}
-	isGroup := jid.Server == types.GroupServer
-	name := s.resolveChatName(ctx, jid, isGroup)
-	if err := s.store.TouchChat(ctx, row.ChatJID, name, body, row.Timestamp, isGroup, false); err != nil {
-		s.log.Warn().Err(err).Msg("touch chat after send")
-	}
-
+	s.finishSend(ctx, &row, jid, resp)
 	out := toProtoMessage(row)
 	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: out}})
 	s.publishChat(ctx, row.ChatJID)
 	return out, nil
+}
+
+// buildReply resolves the quoted message and wraps the reply body in the
+// extended text message WhatsApp expects for replies.
+func (s *Session) buildReply(ctx context.Context, chat types.JID, body, quotedID string) (*daemonstore.Quoted, *waE2E.Message, error) {
+	original, err := s.store.GetMessage(ctx, quotedID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if original.ChatJID != chat.ToNonAD().String() {
+		return nil, nil, errors.New("quoted message belongs to another chat")
+	}
+
+	// The recipient resolves a quote by its (stanza id, participant) pair, so
+	// the participant must name the original author. It is required in
+	// one-on-one chats too, which is why BuildMessageKey, which deliberately
+	// omits it there, is not used.
+	sender, err := types.ParseJID(original.Sender)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse quoted sender %q: %w", original.Sender, err)
+	}
+
+	payload := &waE2E.Message{
+		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text: proto.String(body),
+			ContextInfo: &waE2E.ContextInfo{
+				StanzaID:      proto.String(original.ID),
+				Participant:   proto.String(sender.ToNonAD().String()),
+				QuotedMessage: quotedPayload(ctx, s.store, original),
+			},
+		},
+	}
+	quoted := &daemonstore.Quoted{
+		ID:         original.ID,
+		Sender:     original.Sender,
+		SenderName: original.SenderName,
+		Body:       original.Body,
+		Type:       original.Type,
+	}
+	return quoted, payload, nil
+}
+
+// quotedPayload rebuilds the message being replied to. WhatsApp renders the
+// quote from this embedded copy, so replying to media needs the original
+// attachment descriptor rather than its text preview.
+func quotedPayload(ctx context.Context, st *daemonstore.Store, original daemonstore.Message) *waE2E.Message {
+	if original.Media != nil {
+		if raw, _, err := st.MediaPayload(ctx, original.ID); err == nil && len(raw) > 0 {
+			var msg waE2E.Message
+			if err := proto.Unmarshal(raw, &msg); err == nil {
+				return &msg
+			}
+		}
+	}
+	return &waE2E.Message{Conversation: proto.String(original.Body)}
+}
+
+// finishSend records the server-assigned timestamp and sent status, and bumps
+// the chat preview.
+func (s *Session) finishSend(ctx context.Context, row *daemonstore.Message, jid types.JID, resp whatsmeow.SendResponse) {
+	row.Timestamp = resp.Timestamp.Unix()
+	row.Status = daemonstore.StatusSent
+	if err := s.store.UpdateMessageTimestamp(ctx, row.ID, row.Timestamp); err != nil {
+		s.log.Warn().Err(err).Msg("update sent timestamp")
+	}
+	if err := s.store.UpdateMessageStatus(ctx, row.ID, daemonstore.StatusSent); err != nil {
+		s.log.Warn().Err(err).Msg("mark message sent")
+	}
+	// The row was written with our phone-number JID, but LID chats and groups
+	// send under the LID. Correcting it keeps replies quoting this message
+	// addressable by the recipient.
+	if sender := resp.Sender.ToNonAD(); !sender.IsEmpty() && sender.String() != row.Sender {
+		row.Sender = sender.String()
+		if err := s.store.UpdateMessageSender(ctx, row.ID, row.Sender); err != nil {
+			s.log.Warn().Err(err).Msg("record send identity")
+		}
+	}
+	isGroup := jid.Server == types.GroupServer
+	name := s.resolveChatName(ctx, jid, isGroup)
+	preview := row.Body
+	if row.Media != nil {
+		preview = mediaPreview(row.Type, row.Media)
+	}
+	if err := s.store.TouchChat(ctx, row.ChatJID, name, preview, row.Timestamp, isGroup, false); err != nil {
+		s.log.Warn().Err(err).Msg("touch chat after send")
+	}
 }
 
 func pushNameOf(d *store.Device) string {
@@ -561,6 +729,7 @@ func toProtoMessage(m daemonstore.Message) *zchatv1.Message {
 		Timestamp:  m.Timestamp,
 		Outgoing:   m.Outgoing,
 		Status:     statusToProto(m.Status),
+		Forwarded:  m.Forwarded,
 	}
 	if m.Media != nil {
 		out.Media = &zchatv1.MediaInfo{
@@ -573,6 +742,15 @@ func toProtoMessage(m daemonstore.Message) *zchatv1.Message {
 			Width:     m.Media.Width,
 			Height:    m.Media.Height,
 			Duration:  m.Media.Duration,
+		}
+	}
+	if m.Quoted != nil {
+		out.Quoted = &zchatv1.QuotedMessage{
+			Id:         m.Quoted.ID,
+			Sender:     m.Quoted.Sender,
+			SenderName: m.Quoted.SenderName,
+			Body:       m.Quoted.Body,
+			Type:       m.Quoted.Type,
 		}
 	}
 	return out
@@ -606,6 +784,7 @@ func ToProtoChat(c daemonstore.Chat) *zchatv1.Chat {
 		LastMessage: c.LastMessage,
 		UpdatedAt:   c.UpdatedAt,
 		IsGroup:     c.IsGroup,
+		MutedUntil:  c.MutedUntil,
 	}
 }
 
