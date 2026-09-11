@@ -40,6 +40,7 @@ func (c *Client) Close() error { return c.conn.Close() }
 // reconnecting after transport errors.
 func (c *Client) StreamEvents(ctx context.Context, onEvent func(*zchatv1.Event), onError func(error)) {
 	go func() {
+		delay := 2 * time.Second
 		for ctx.Err() == nil {
 			stream, err := c.svc.StreamEvents(ctx, &zchatv1.StreamEventsRequest{})
 			if err == nil {
@@ -51,10 +52,18 @@ func (c *Client) StreamEvents(ctx context.Context, onEvent func(*zchatv1.Event),
 			if err != nil {
 				idle(func() { onError(err) })
 			}
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-time.After(2 * time.Second):
+			case <-timer.C:
+			}
+			if delay < 60*time.Second {
+				delay *= 2
+				if delay > 60*time.Second {
+					delay = 60 * time.Second
+				}
 			}
 		}
 	}()

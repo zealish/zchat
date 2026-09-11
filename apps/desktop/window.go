@@ -501,13 +501,9 @@ func (w *window) openChat(chat *zchatv1.Chat) {
 	clear(w.messageRows)
 	w.messages.Splice(0, w.messages.Len())
 	w.splitView.SetShowContent(true)
-
 	if w.client == nil {
 		return
 	}
-	// Marking ourselves available is what makes the server start sending the
-	// contact's presence back.
-	w.client.SetPresence(w.ctx, w.activeChat, false, true)
 	w.client.GetMessages(w.ctx, w.activeChat, func(chatJID string, msgs []*zchatv1.Message, err error) {
 		if err != nil {
 			w.log.Error().Err(err).Msg("load messages")
