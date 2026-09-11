@@ -78,4 +78,11 @@ flatpak: dist-tarball
 		$(DIST_DIR)/zchat-$(VERSION).flatpak $(APP_ID)
 
 reset-session:
-	rm -f $$HOME/.local/share/zchat/zchat.db*
+	@if pgrep -u "$$(id -u)" -x zchat >/dev/null || pgrep -u "$$(id -u)" -x zchat-daemon >/dev/null; then \
+		printf '%s\n' 'Close ZChat and stop zchat-daemon before resetting the session.' >&2; \
+		exit 1; \
+	fi
+	@data_home="$${XDG_DATA_HOME:-$$HOME/.local/share}"; \
+	session_dir="$$data_home/zchat"; \
+	rm -f "$$session_dir/zchat.db" "$$session_dir/zchat.db-wal" "$$session_dir/zchat.db-shm" && \
+	printf 'Removed session database: %s/zchat.db\n' "$$session_dir"
