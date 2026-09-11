@@ -3,3 +3,4 @@
 *.gresource
 apps/desktop/ui/*.ui
 /PRD.md
+/ZChatFingerprintPRD.md
