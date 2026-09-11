@@ -78,8 +78,17 @@ flatpak: dist-tarball
 		$(DIST_DIR)/zchat-$(VERSION).flatpak $(APP_ID)
 
 reset-session:
-	@if pgrep -u "$$(id -u)" -x zchat >/dev/null || pgrep -u "$$(id -u)" -x zchat-daemon >/dev/null; then \
-		printf '%s\n' 'Close ZChat and stop zchat-daemon before resetting the session.' >&2; \
+	@daemon_pid="$$(pgrep -u "$$(id -u)" -x zchat-daemon || true)"; \
+	if [ -n "$$daemon_pid" ]; then \
+		printf 'Stopping zchat-daemon (PID %s)\n' "$$daemon_pid"; \
+		kill $$daemon_pid; \
+		for i in 1 2 3 4 5; do kill -0 $$daemon_pid 2>/dev/null || break; sleep 1; done; \
+		if kill -0 $$daemon_pid 2>/dev/null; then \
+			printf '%s\n' 'zchat-daemon did not stop cleanly.' >&2; exit 1; \
+		fi; \
+	fi
+	@if pgrep -u "$$(id -u)" -x zchat >/dev/null; then \
+		printf '%s\n' 'Close ZChat before resetting the session.' >&2; \
 		exit 1; \
 	fi
 	@data_home="$${XDG_DATA_HOME:-$$HOME/.local/share}"; \
