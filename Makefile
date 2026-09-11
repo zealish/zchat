@@ -4,7 +4,9 @@ UI_DIR := apps/desktop/ui
 BUILD_DIR := build
 DIST_DIR := dist
 APP_ID := com.zealish.ZChat
-VERSION ?= 0.3.0
+VERSION ?= 0.5.0
+GO_LDFLAGS ?=
+GO_BUILD_FLAGS := $(if $(GO_LDFLAGS),-ldflags '$(GO_LDFLAGS)',)
 
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
@@ -26,10 +28,10 @@ ui:
 	glib-compile-resources --sourcedir=$(UI_DIR) --target=$(UI_DIR)/zchat.gresource $(UI_DIR)/zchat.gresource.xml
 
 daemon:
-	CGO_ENABLED=0 $(GO) build -o $(BUILD_DIR)/zchat-daemon ./apps/daemon
+	CGO_ENABLED=0 $(GO) build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/zchat-daemon ./apps/daemon
 
 desktop: ui
-	CGO_ENABLED=1 $(GO) build -o $(BUILD_DIR)/zchat ./apps/desktop
+	CGO_ENABLED=1 $(GO) build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/zchat ./apps/desktop
 
 build: daemon desktop
 
@@ -66,7 +68,10 @@ rpm: dist-tarball
 		-bb packaging/rpm/zchat.spec
 	find $(DIST_DIR)/rpmbuild/RPMS -name '*.rpm' -exec cp {} $(DIST_DIR)/ \;
 
+# The manifest cannot interpolate make variables, so the versioned tarball is
+# copied to a stable name the flatpak source can point at.
 flatpak: dist-tarball
+	cp $(DIST_DIR)/zchat-$(VERSION).tar.gz $(DIST_DIR)/zchat-src.tar.gz
 	flatpak-builder --force-clean --repo=$(DIST_DIR)/flatpak-repo \
 		$(DIST_DIR)/flatpak-build packaging/flatpak/$(APP_ID).yaml
 	flatpak build-bundle $(DIST_DIR)/flatpak-repo \

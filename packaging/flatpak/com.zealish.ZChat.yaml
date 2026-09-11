@@ -41,4 +41,4 @@ modules:
       # Built from the same vendored tarball as the RPM, so the sandbox never
       # needs network access to fetch Go modules.
       - type: archive
-        path: ../../dist/zchat-0.3.0.tar.gz
+        path: ../../dist/zchat-src.tar.gz
