@@ -190,6 +190,21 @@ func (c *Client) DownloadMedia(ctx context.Context, messageID string, onDone fun
 	}()
 }
 
+// SetPresence reports typing and online state off the main loop. It is fired
+// on every keystroke burst, so failures are dropped rather than reported.
+func (c *Client) SetPresence(ctx context.Context, chatJID string, typing, available bool) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+
+		c.svc.SetPresence(callCtx, &zchatv1.SetPresenceRequest{
+			ChatJid:   chatJID,
+			Typing:    typing,
+			Available: available,
+		})
+	}()
+}
+
 func idle(f func()) {
 	glib.IdleAdd(f)
 }

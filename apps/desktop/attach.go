@@ -9,6 +9,7 @@ import (
 
 	coreglib "github.com/diamondburned/gotk4/pkg/core/glib"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
+	"github.com/diamondburned/gotk4/pkg/gdkpixbuf/v2"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 
@@ -73,8 +74,18 @@ func (w *window) showAttachmentBar() {
 	w.attachmentName.SetText(filepath.Base(att.path))
 	w.attachmentSize.SetText(humanSize(att.size))
 
+	// The composer preview is a still, so only the first frame is used.
+	var thumb *gdkpixbuf.Pixbuf
 	if strings.HasPrefix(att.mime, "image/") {
-		w.attachmentThumb.SetFilename(att.path)
+		anim, err := w.loadAnimation(att.path)
+		if err != nil {
+			w.log.Warn().Err(err).Str("path", att.path).Msg("render attachment thumbnail")
+		} else {
+			thumb = anim.frames[0]
+		}
+	}
+	if thumb != nil {
+		w.attachmentThumb.SetPixbuf(thumb)
 		w.attachmentThumb.SetVisible(true)
 		w.attachmentIcon.SetVisible(false)
 	} else {

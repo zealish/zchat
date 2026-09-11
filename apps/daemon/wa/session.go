@@ -46,6 +46,8 @@ type Session struct {
 
 	historyCh chan *events.HistorySync
 	startOnce sync.Once
+
+	presence *presenceTracker
 }
 
 // New builds a session sharing the daemon's SQLite handle with whatsmeow.
@@ -63,6 +65,7 @@ func New(ctx context.Context, db *sql.DB, st *daemonstore.Store, log zerolog.Log
 		pub:       pub,
 		state:     &zchatv1.ConnectionState{Status: zchatv1.ConnectionStatus_CONNECTION_STATUS_DISCONNECTED},
 		historyCh: make(chan *events.HistorySync, 8),
+		presence:  newPresenceTracker(),
 	}
 	return s, nil
 }
@@ -199,6 +202,8 @@ func (s *Session) handleEvent(evt any) {
 		s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTED, "")
 		go s.backfillChatNames(ctx)
 	case *events.Disconnected:
+		// Subscriptions and chat states do not survive a reconnect.
+		s.presence.reset()
 		s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_DISCONNECTED, "")
 	case *events.LoggedOut:
 		s.log.Warn().Str("reason", e.Reason.String()).Msg("logged out by server")
@@ -208,6 +213,10 @@ func (s *Session) handleEvent(evt any) {
 		s.onMessage(ctx, e)
 	case *events.Receipt:
 		s.onReceipt(ctx, e)
+	case *events.ChatPresence:
+		s.onChatPresence(ctx, e)
+	case *events.Presence:
+		s.onPresence(ctx, e)
 	case *events.HistorySync:
 		select {
 		case s.historyCh <- e:

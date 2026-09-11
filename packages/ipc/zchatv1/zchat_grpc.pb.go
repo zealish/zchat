@@ -30,6 +30,7 @@ const (
 	ChatService_Logout_FullMethodName             = "/zchat.v1.ChatService/Logout"
 	ChatService_DownloadMedia_FullMethodName      = "/zchat.v1.ChatService/DownloadMedia"
 	ChatService_SearchChats_FullMethodName        = "/zchat.v1.ChatService/SearchChats"
+	ChatService_SetPresence_FullMethodName        = "/zchat.v1.ChatService/SetPresence"
 	ChatService_StreamEvents_FullMethodName       = "/zchat.v1.ChatService/StreamEvents"
 )
 
@@ -48,6 +49,7 @@ type ChatServiceClient interface {
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
 	DownloadMedia(ctx context.Context, in *DownloadMediaRequest, opts ...grpc.CallOption) (*DownloadMediaResponse, error)
 	SearchChats(ctx context.Context, in *SearchChatsRequest, opts ...grpc.CallOption) (*SearchChatsResponse, error)
+	SetPresence(ctx context.Context, in *SetPresenceRequest, opts ...grpc.CallOption) (*SetPresenceResponse, error)
 	StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
 }
 
@@ -169,6 +171,16 @@ func (c *chatServiceClient) SearchChats(ctx context.Context, in *SearchChatsRequ
 	return out, nil
 }
 
+func (c *chatServiceClient) SetPresence(ctx context.Context, in *SetPresenceRequest, opts ...grpc.CallOption) (*SetPresenceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetPresenceResponse)
+	err := c.cc.Invoke(ctx, ChatService_SetPresence_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatServiceClient) StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], ChatService_StreamEvents_FullMethodName, cOpts...)
@@ -203,6 +215,7 @@ type ChatServiceServer interface {
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
 	DownloadMedia(context.Context, *DownloadMediaRequest) (*DownloadMediaResponse, error)
 	SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error)
+	SetPresence(context.Context, *SetPresenceRequest) (*SetPresenceResponse, error)
 	StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error
 	mustEmbedUnimplementedChatServiceServer()
 }
@@ -246,6 +259,9 @@ func (UnimplementedChatServiceServer) DownloadMedia(context.Context, *DownloadMe
 }
 func (UnimplementedChatServiceServer) SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SearchChats not implemented")
+}
+func (UnimplementedChatServiceServer) SetPresence(context.Context, *SetPresenceRequest) (*SetPresenceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetPresence not implemented")
 }
 func (UnimplementedChatServiceServer) StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error {
 	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
@@ -469,6 +485,24 @@ func _ChatService_SearchChats_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatService_SetPresence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetPresenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).SetPresence(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_SetPresence_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).SetPresence(ctx, req.(*SetPresenceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatService_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -530,6 +564,10 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SearchChats",
 			Handler:    _ChatService_SearchChats_Handler,
+		},
+		{
+			MethodName: "SetPresence",
+			Handler:    _ChatService_SetPresence_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

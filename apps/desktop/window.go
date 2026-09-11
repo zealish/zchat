@@ -40,6 +40,7 @@ type window struct {
 	qrImage      *gtk.Picture
 	splitView    *adw.NavigationSplitView
 	contentPage  *adw.NavigationPage
+	contentTitle *adw.WindowTitle
 	chatList     *gtk.ListView
 	chatFilter   *adw.ToggleGroup
 	messageList  *gtk.ListView
@@ -74,6 +75,11 @@ type window struct {
 	stickToBottom     bool
 	bottomQueued      bool
 	scrollingToBottom bool
+	presence          map[string]*chatPresence
+	typingTimers      map[string]glib.SourceHandle
+	idleTimer         glib.SourceHandle
+	animCache         map[string]*animation
+	animTimers        map[*gtk.Picture]glib.SourceHandle
 
 	client      *client.Client
 	activeChat  string
@@ -95,28 +101,29 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 	builder := gtk.NewBuilderFromResource("/com/zealish/ZChat/window.ui")
 
 	w := &window{
-		ctx:           ctx,
-		log:           log,
-		app:           app,
-		sock:          socketPath,
-		win:           builder.GetObject("window").Cast().(*adw.ApplicationWindow),
-		toastOverlay:  builder.GetObject("toast_overlay").Cast().(*adw.ToastOverlay),
-		mainStack:     builder.GetObject("main_stack").Cast().(*gtk.Stack),
-		qrImage:       builder.GetObject("qr_image").Cast().(*gtk.Picture),
-		splitView:     builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
-		contentPage:   builder.GetObject("content_page").Cast().(*adw.NavigationPage),
-		chatList:      builder.GetObject("chat_list").Cast().(*gtk.ListView),
-		chatFilter:    builder.GetObject("chat_filter").Cast().(*adw.ToggleGroup),
-		messageList:   builder.GetObject("message_list").Cast().(*gtk.ListView),
-		messageScrl:   builder.GetObject("message_scroll").Cast().(*gtk.ScrolledWindow),
-		messageEntry:  builder.GetObject("message_entry").Cast().(*gtk.Entry),
-		sendButton:    builder.GetObject("send_button").Cast().(*gtk.Button),
-		attachButton:  builder.GetObject("attach_button").Cast().(*gtk.Button),
-		searchEntry:   builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
-		replyBar:      builder.GetObject("reply_bar").Cast().(*gtk.Box),
-		replySender:   builder.GetObject("reply_sender").Cast().(*gtk.Label),
-		replyBody:     builder.GetObject("reply_body").Cast().(*gtk.Label),
-		replyCancel:   builder.GetObject("reply_cancel").Cast().(*gtk.Button),
+		ctx:          ctx,
+		log:          log,
+		app:          app,
+		sock:         socketPath,
+		win:          builder.GetObject("window").Cast().(*adw.ApplicationWindow),
+		toastOverlay: builder.GetObject("toast_overlay").Cast().(*adw.ToastOverlay),
+		mainStack:    builder.GetObject("main_stack").Cast().(*gtk.Stack),
+		qrImage:      builder.GetObject("qr_image").Cast().(*gtk.Picture),
+		splitView:    builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
+		contentPage:  builder.GetObject("content_page").Cast().(*adw.NavigationPage),
+		contentTitle: builder.GetObject("content_title").Cast().(*adw.WindowTitle),
+		chatList:     builder.GetObject("chat_list").Cast().(*gtk.ListView),
+		chatFilter:   builder.GetObject("chat_filter").Cast().(*adw.ToggleGroup),
+		messageList:  builder.GetObject("message_list").Cast().(*gtk.ListView),
+		messageScrl:  builder.GetObject("message_scroll").Cast().(*gtk.ScrolledWindow),
+		messageEntry: builder.GetObject("message_entry").Cast().(*gtk.Entry),
+		sendButton:   builder.GetObject("send_button").Cast().(*gtk.Button),
+		attachButton: builder.GetObject("attach_button").Cast().(*gtk.Button),
+		searchEntry:  builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
+		replyBar:     builder.GetObject("reply_bar").Cast().(*gtk.Box),
+		replySender:  builder.GetObject("reply_sender").Cast().(*gtk.Label),
+		replyBody:    builder.GetObject("reply_body").Cast().(*gtk.Label),
+		replyCancel:  builder.GetObject("reply_cancel").Cast().(*gtk.Button),
 
 		attachmentBar:    builder.GetObject("attachment_bar").Cast().(*gtk.Box),
 		attachmentThumb:  builder.GetObject("attachment_thumb").Cast().(*gtk.Picture),
@@ -130,6 +137,10 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		chatIndex:     make(map[string]*zchatv1.Chat),
 		messageRows:   make(map[string]*gtk.ListItem),
 		mediaHandlers: make(map[*gtk.Button]coreglib.SignalHandle),
+		presence:      make(map[string]*chatPresence),
+		typingTimers:  make(map[string]glib.SourceHandle),
+		animCache:     make(map[string]*animation),
+		animTimers:    make(map[*gtk.Picture]glib.SourceHandle),
 	}
 
 	w.win.SetApplication(&app.Application)
@@ -140,6 +151,7 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 	w.setupShortcuts()
 	w.setupDragAndDrop()
 	w.setupPasteShortcut()
+	w.setupTypingNotifier()
 	w.setupAutoScroll()
 	w.mainStack.SetVisibleChildName("qr")
 
@@ -192,6 +204,8 @@ func (w *window) onEvent(evt *zchatv1.Event) {
 		w.onMessage(payload.MessageUpdated, true)
 	case *zchatv1.Event_MessageDeleted:
 		w.onMessageDeleted(payload.MessageDeleted)
+	case *zchatv1.Event_PresenceChanged:
+		w.onPresence(payload.PresenceChanged)
 	}
 }
 
@@ -474,11 +488,16 @@ func chatMarkers(chat *zchatv1.Chat) string {
 }
 
 func (w *window) openChat(chat *zchatv1.Chat) {
+	// The previous chat must not be left with a dangling typing indicator.
+	w.stopTyping()
+
 	w.activeChat = chat.GetJid()
 	w.setComposerEnabled(true)
 	w.activeGroup = chat.GetIsGroup()
 	w.cancelAttachment()
 	w.contentPage.SetTitle(displayName(chat))
+	w.contentTitle.SetTitle(displayName(chat))
+	w.refreshSubtitle()
 	clear(w.messageRows)
 	w.messages.Splice(0, w.messages.Len())
 	w.splitView.SetShowContent(true)
@@ -486,6 +505,9 @@ func (w *window) openChat(chat *zchatv1.Chat) {
 	if w.client == nil {
 		return
 	}
+	// Marking ourselves available is what makes the server start sending the
+	// contact's presence back.
+	w.client.SetPresence(w.ctx, w.activeChat, false, true)
 	w.client.GetMessages(w.ctx, w.activeChat, func(chatJID string, msgs []*zchatv1.Message, err error) {
 		if err != nil {
 			w.log.Error().Err(err).Msg("load messages")
@@ -713,8 +735,23 @@ func (w *window) setupMessageList() {
 		if w.messageRows[msg.GetId()] == item {
 			delete(w.messageRows, msg.GetId())
 		}
+		// A row scrolled out of view must not keep ticking its animation.
+		w.stopAnimation(mediaPreviewOf(item))
 	})
 	w.messageList.SetFactory(&factory.ListItemFactory)
+}
+
+// mediaBoxOf returns a message row's attachment container, the fourth child of
+// its bubble.
+func mediaBoxOf(item *gtk.ListItem) *gtk.Box {
+	bubble := item.Child().(*gtk.Box).FirstChild().(*gtk.Box)
+	sender := bubble.FirstChild().(*gtk.Label)
+	forwarded := sender.NextSibling().(*gtk.Label)
+	return forwarded.NextSibling().(*gtk.Box).NextSibling().(*gtk.Box)
+}
+
+func mediaPreviewOf(item *gtk.ListItem) *gtk.Picture {
+	return mediaBoxOf(item).FirstChild().(*gtk.Picture)
 }
 
 func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
@@ -723,7 +760,7 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 	sender := bubble.FirstChild().(*gtk.Label)
 	forwarded := sender.NextSibling().(*gtk.Label)
 	quoted := forwarded.NextSibling().(*gtk.Box)
-	media := quoted.NextSibling().(*gtk.Box)
+	media := mediaBoxOf(item)
 	body := media.NextSibling().(*gtk.Label)
 	meta := body.NextSibling().(*gtk.Label)
 
@@ -782,11 +819,13 @@ func (w *window) bindMedia(media *gtk.Box, msg *zchatv1.Message) {
 	preview := media.FirstChild().(*gtk.Picture)
 	action := preview.NextSibling().(*gtk.Button)
 
-	// Rows are recycled, so the previous message's click handler must go.
+	// Rows are recycled, so the previous message's click handler and running
+	// animation must go.
 	if handle, ok := w.mediaHandlers[action]; ok {
 		action.HandlerDisconnect(handle)
 		delete(w.mediaHandlers, action)
 	}
+	w.stopAnimation(preview)
 
 	if info == nil {
 		media.SetVisible(false)
@@ -797,8 +836,13 @@ func (w *window) bindMedia(media *gtk.Box, msg *zchatv1.Message) {
 	local := info.GetPath()
 	switch {
 	case local != "" && isVisualMedia(msg.GetType()):
-		preview.SetFilename(local)
-		preview.SetVisible(true)
+		if anim, err := w.loadAnimation(local); err == nil {
+			w.showAnimation(preview, anim)
+			preview.SetVisible(true)
+		} else {
+			w.log.Warn().Err(err).Str("path", local).Msg("render media preview")
+			preview.SetVisible(false)
+		}
 	case len(info.GetThumbnail()) > 0:
 		if pixbuf, err := pixbufFromBytes(w.ctx, info.GetThumbnail()); err == nil {
 			preview.SetPixbuf(pixbuf)

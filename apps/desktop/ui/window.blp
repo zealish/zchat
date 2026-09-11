@@ -91,7 +91,11 @@ Adw.ApplicationWindow window {
 
             child: Adw.ToolbarView {
               [top]
-              Adw.HeaderBar {}
+              Adw.HeaderBar {
+                title-widget: Adw.WindowTitle content_title {
+                  title: "Conversation";
+                };
+              }
 
               content: Gtk.ScrolledWindow message_scroll {
                 hscrollbar-policy: never;

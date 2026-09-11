@@ -91,10 +91,11 @@ func extractMedia(msg *waE2E.Message) (string, *daemonstore.Media) {
 		m := msg.GetStickerMessage()
 		kind = TypeSticker
 		md = daemonstore.Media{
-			Mime:   m.GetMimetype(),
-			Size:   int64(m.GetFileLength()),
-			Width:  int32(m.GetWidth()),
-			Height: int32(m.GetHeight()),
+			Mime:      m.GetMimetype(),
+			Size:      int64(m.GetFileLength()),
+			Thumbnail: m.GetPngThumbnail(),
+			Width:     int32(m.GetWidth()),
+			Height:    int32(m.GetHeight()),
 		}
 	default:
 		return "", nil

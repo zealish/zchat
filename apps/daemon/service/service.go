@@ -257,6 +257,14 @@ func (s *Service) Logout(ctx context.Context, _ *zchatv1.LogoutRequest) (*zchatv
 	return &zchatv1.LogoutResponse{}, nil
 }
 
+// SetPresence reports the local user's typing and online state.
+func (s *Service) SetPresence(ctx context.Context, req *zchatv1.SetPresenceRequest) (*zchatv1.SetPresenceResponse, error) {
+	if err := s.session.SetPresence(ctx, req.GetChatJid(), req.GetTyping(), req.GetAvailable()); err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.SetPresenceResponse{}, nil
+}
+
 // StreamEvents pushes live updates. The current connection state (and any
 // pending QR code) is sent first so an attaching client never has to poll.
 func (s *Service) StreamEvents(_ *zchatv1.StreamEventsRequest, stream zchatv1.ChatService_StreamEventsServer) error {

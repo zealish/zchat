@@ -16,6 +16,7 @@ service ChatService {
   rpc Logout(LogoutRequest) returns (LogoutResponse);
   rpc DownloadMedia(DownloadMediaRequest) returns (DownloadMediaResponse);
   rpc SearchChats(SearchChatsRequest) returns (SearchChatsResponse);
+  rpc SetPresence(SetPresenceRequest) returns (SetPresenceResponse);
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
 }
 
@@ -204,6 +205,30 @@ message MessageDeleted {
   string chat_jid = 2;
 }
 
+// PresenceUpdate reports either a chat-level typing state or a user's
+// online/offline transition. chat_jid is the conversation the update belongs
+// to; for direct chats it equals the user's JID.
+message PresenceUpdate {
+  string chat_jid = 1;
+  string user_jid = 2;
+  string user_name = 3;
+  bool typing = 4;
+  bool recording = 5; // typing a voice message rather than text
+  bool online = 6;
+  int64 last_seen = 7; // unix seconds; 0 when unknown or hidden
+}
+
+// SetPresenceRequest reports the local user's activity. typing applies to
+// chat_jid; available toggles the global online marker, which WhatsApp also
+// requires before it sends any presence back.
+message SetPresenceRequest {
+  string chat_jid = 1;
+  bool typing = 2;
+  bool available = 3;
+}
+
+message SetPresenceResponse {}
+
 message Event {
   oneof payload {
     Message message_received = 1;
@@ -212,5 +237,6 @@ message Event {
     QRUpdate qr_updated = 4;
     ConnectionState connection_state = 5;
     MessageDeleted message_deleted = 6;
+    PresenceUpdate presence_changed = 7;
   }
 }
