@@ -12,6 +12,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+      - name: Install GTK build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev blueprint-compiler
+      - name: Generate UI resources
+        run: make ui
       - run: go test ./...
       - run: go build ./apps/daemon
       - run: go build ./apps/desktop
