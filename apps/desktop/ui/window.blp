@@ -30,6 +30,45 @@ Adw.ApplicationWindow window {
       }
 
       Gtk.StackPage {
+        name: "sync";
+        child: Adw.ToolbarView {
+          [top]
+          Adw.HeaderBar {
+            show-start-title-buttons: false;
+          }
+
+          content: Adw.StatusPage sync_page {
+            icon-name: "folder-download-symbolic";
+            title: "Syncing your chats";
+            description: "Getting your conversations and contacts ready";
+
+            child: Gtk.Box {
+              orientation: vertical;
+              spacing: 12;
+              halign: center;
+              width-request: 360;
+
+              Gtk.ProgressBar sync_progress {
+                hexpand: true;
+              }
+
+              Gtk.Label sync_detail {
+                wrap: true;
+                justify: center;
+                styles ["dim-label"]
+              }
+
+              Gtk.Label sync_counts {
+                wrap: true;
+                justify: center;
+                styles ["dim-label", "caption"]
+              }
+            };
+          };
+        };
+      }
+
+      Gtk.StackPage {
         name: "chat";
         child: Adw.NavigationSplitView split_view {
           min-sidebar-width: 280;

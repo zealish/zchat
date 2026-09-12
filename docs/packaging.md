@@ -4,11 +4,11 @@ ZChat ships as an RPM and a Flatpak. Both are driven from the Makefile and both
 build from the same vendored source tarball (PRD §16).
 
 ```bash
-make rpm VERSION=0.6.0
-make flatpak VERSION=0.6.0
+make rpm VERSION=0.7.0
+make flatpak VERSION=0.7.0
 ```
 
-`VERSION ?= 0.6.0` in the Makefile, so plain `make rpm` / `make flatpak` use
+`VERSION ?= 0.7.0` in the Makefile, so plain `make rpm` / `make flatpak` use
 that default. `APP_ID := com.zealish.ZChat`, `DIST_DIR := dist`.
 
 ## `make dist-tarball`
@@ -52,7 +52,7 @@ download a newer toolchain to satisfy the `go` directive in `go.mod`.
 ## RPM
 
 ```bash
-make rpm VERSION=0.6.0
+make rpm VERSION=0.7.0
 ```
 
 After `dist-tarball`, the target:
@@ -69,8 +69,8 @@ PRD §16 gives the expected output shape: `dist/zchat-x.y.z.fc42.x86_64.rpm`.
 ### Spec highlights (`packaging/rpm/zchat.spec`)
 
 - `%global appid com.zealish.ZChat`
-- `Version: %{?_zchat_version}%{!?_zchat_version:0.6.0}` — takes the version
-  the Makefile passes in, falling back to `0.6.0`.
+- `Version: %{?_zchat_version}%{!?_zchat_version:0.7.0}` — takes the version
+  the Makefile passes in, falling back to `0.7.0`.
 - `Release: 1%{?dist}`, `License: GPL-3.0-or-later`,
   `URL: https://github.com/zealish/zchat`, `Source0: %{name}-%{version}.tar.gz`.
 - `BuildRequires: golang >= 1.24`, `gcc`, `pkgconfig(gtk4)`,
@@ -135,15 +135,16 @@ The `%build` section makes the complementary point about *not* touching
 plus `%license LICENSE` and `%doc README.md`. `%check` runs
 `desktop-file-validate` on the installed desktop file.
 
-The `%changelog` records `0.6.0-1` ("Emoji picker, find in conversation and a
-preferences dialog"), `0.5.0-1` ("Typing indicators, contact presence and
+The `%changelog` records `0.7.0-1` ("Gate the UI on a progress screen until the
+first full sync completes"), `0.6.0-1` ("Emoji picker, find in conversation and
+a preferences dialog"), `0.5.0-1` ("Typing indicators, contact presence and
 animated WebP stickers"), and `0.4.0-1` ("Media sending, read receipts,
 keyboard shortcuts and drag & drop").
 
 ## Flatpak
 
 ```bash
-make flatpak VERSION=0.6.0
+make flatpak VERSION=0.7.0
 ```
 
 After `dist-tarball`:
@@ -224,6 +225,7 @@ Release entries, newest first:
 
 | Version | Date | Description |
 |---|---|---|
+| 0.7.0 | 2026-09-12 | Sync progress screen gating the UI until the first full history sync finishes, plus duplicate chat merging. |
 | 0.6.0 | 2026-09-12 | Emoji picker, find in conversation, and a preferences dialog with theme selection. |
 | 0.5.0 | 2026-09-11 | Typing indicators, contact presence, and animated WebP stickers. |
 | 0.4.0 | 2026-09-11 | Sending attachments, read receipts, and RPM and Flatpak packaging. |

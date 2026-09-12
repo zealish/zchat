@@ -45,7 +45,7 @@ make run
 ## Makefile targets
 
 Variables: `GO ?= go`, `UI_DIR := apps/desktop/ui`, `BUILD_DIR := build`,
-`DIST_DIR := dist`, `APP_ID := com.zealish.ZChat`, `VERSION ?= 0.6.0`,
+`DIST_DIR := dist`, `APP_ID := com.zealish.ZChat`, `VERSION ?= 0.7.0`,
 `GO_LDFLAGS ?=`, `FLATPAK_BUILDER ?= flatpak-builder`.
 
 `all` is `build`.
@@ -171,7 +171,7 @@ leave the file absent — which is why CI runs `make ui` before `go build
 
 ## Version stamping
 
-`VERSION ?= 0.6.0` feeds:
+`VERSION ?= 0.7.0` feeds:
 
 ```make
 GO_BUILD_FLAGS := -ldflags '-X main.version=$(VERSION) $(GO_LDFLAGS)'
@@ -197,7 +197,7 @@ un-stamped build reports `dev` in the About dialog.
 Override the version per build:
 
 ```bash
-make build VERSION=0.6.0
+make build VERSION=0.7.0
 ```
 
 ## Running the client against a locally built daemon

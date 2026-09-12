@@ -35,6 +35,7 @@ func (s *Session) processHistorySync(ctx context.Context, evt *events.HistorySyn
 		Int("conversations", len(conversations)).
 		Msg("processing history sync")
 
+	syncedChats, syncedMessages := 0, 0
 	for _, conv := range conversations {
 		jid, err := types.ParseJID(conv.GetID())
 		if err != nil {
@@ -51,7 +52,7 @@ func (s *Session) processHistorySync(ctx context.Context, evt *events.HistorySyn
 		}
 		isGroup := jid.Server == types.GroupServer
 
-		chatJID := jid.ToNonAD().String()
+		chatJID := s.canonicalChatJID(ctx, jid)
 		chat := daemonstore.Chat{
 			JID:        chatJID,
 			Name:       conv.GetName(),
@@ -99,5 +100,8 @@ func (s *Session) processHistorySync(ctx context.Context, evt *events.HistorySyn
 			continue
 		}
 		s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_ChatUpdated{ChatUpdated: ToProtoChat(stored)}})
+		syncedChats++
+		syncedMessages += len(batch)
 	}
+	s.fullSync.Chunk(syncedChats, syncedMessages)
 }

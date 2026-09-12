@@ -40,6 +40,12 @@ type window struct {
 	toastOverlay   *adw.ToastOverlay
 	mainStack      *gtk.Stack
 	qrImage        *gtk.Picture
+	syncPage       *adw.StatusPage
+	syncProgress   *gtk.ProgressBar
+	syncDetail     *gtk.Label
+	syncCounts     *gtk.Label
+	syncing        bool
+	syncPulse      glib.SourceHandle
 	splitView      *adw.NavigationSplitView
 	contentPage    *adw.NavigationPage
 	contentTitle   *adw.WindowTitle
@@ -132,6 +138,10 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		toastOverlay:   builder.GetObject("toast_overlay").Cast().(*adw.ToastOverlay),
 		mainStack:      builder.GetObject("main_stack").Cast().(*gtk.Stack),
 		qrImage:        builder.GetObject("qr_image").Cast().(*gtk.Picture),
+		syncPage:       builder.GetObject("sync_page").Cast().(*adw.StatusPage),
+		syncProgress:   builder.GetObject("sync_progress").Cast().(*gtk.ProgressBar),
+		syncDetail:     builder.GetObject("sync_detail").Cast().(*gtk.Label),
+		syncCounts:     builder.GetObject("sync_counts").Cast().(*gtk.Label),
 		splitView:      builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
 		headerAvatar:   builder.GetObject("header_avatar").Cast().(*adw.Avatar),
 		contentPage:    builder.GetObject("content_page").Cast().(*adw.NavigationPage),
@@ -357,6 +367,12 @@ func (w *window) onEvent(evt *zchatv1.Event) {
 		w.onPresence(payload.PresenceChanged)
 	case *zchatv1.Event_ProfilePictureUpdated:
 		w.onProfilePictureUpdated(payload.ProfilePictureUpdated)
+	case *zchatv1.Event_ChatUpdated:
+		w.upsertChat(payload.ChatUpdated)
+	case *zchatv1.Event_ChatDeleted:
+		w.removeChat(payload.ChatDeleted.GetJid())
+	case *zchatv1.Event_SyncState:
+		w.onSyncState(payload.SyncState)
 	}
 }
 
@@ -364,12 +380,75 @@ func (w *window) onConnectionState(state *zchatv1.ConnectionState) {
 	w.connected = state.GetStatus() == zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTED
 	w.ownJID = state.GetOwnJid()
 	w.connStatus = state.GetStatus().String()
-	if w.connected {
+	if state.GetStatus() == zchatv1.ConnectionStatus_CONNECTION_STATUS_LOGGED_OUT {
+		w.mainStack.SetVisibleChildName("qr")
+		return
+	}
+	if w.connected && !w.syncing {
 		w.mainStack.SetVisibleChildName("chat")
 		w.loadChats()
-	} else if state.GetStatus() == zchatv1.ConnectionStatus_CONNECTION_STATUS_LOGGED_OUT {
-		w.mainStack.SetVisibleChildName("qr")
 	}
+}
+
+// onSyncState renders full-sync progress and keeps the main view blocked until
+// the daemon reports the history and contact sync as finished, so the chat list
+// is never shown half-populated.
+func (w *window) onSyncState(state *zchatv1.SyncState) {
+	switch state.GetStage() {
+	case zchatv1.SyncStage_SYNC_STAGE_CONNECTING,
+		zchatv1.SyncStage_SYNC_STAGE_CONTACTS,
+		zchatv1.SyncStage_SYNC_STAGE_HISTORY,
+		zchatv1.SyncStage_SYNC_STAGE_FINALIZING:
+		w.syncing = true
+	default:
+		if !w.syncing {
+			return
+		}
+		w.syncing = false
+		w.stopSyncPulse()
+		if w.connected {
+			w.mainStack.SetVisibleChildName("chat")
+			w.loadChats()
+		}
+		return
+	}
+
+	w.mainStack.SetVisibleChildName("sync")
+	w.syncDetail.SetText(state.GetDetail())
+	w.syncCounts.SetText(syncCounts(state))
+	if state.GetIndeterminate() {
+		w.startSyncPulse()
+	} else {
+		w.stopSyncPulse()
+		w.syncProgress.SetFraction(state.GetProgress())
+	}
+}
+
+func syncCounts(state *zchatv1.SyncState) string {
+	if state.GetContactsSynced() == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d contacts", state.GetContactsSynced())
+}
+
+// startSyncPulse animates the bar while the daemon cannot estimate progress.
+func (w *window) startSyncPulse() {
+	if w.syncPulse != 0 {
+		return
+	}
+	w.syncProgress.Pulse()
+	w.syncPulse = glib.TimeoutAdd(120, func() bool {
+		w.syncProgress.Pulse()
+		return true
+	})
+}
+
+func (w *window) stopSyncPulse() {
+	if w.syncPulse == 0 {
+		return
+	}
+	glib.SourceRemove(w.syncPulse)
+	w.syncPulse = 0
 }
 
 func (w *window) showQR(code string) {
@@ -426,6 +505,23 @@ func (w *window) upsertChat(chat *zchatv1.Chat) {
 		w.chatOrder = append(w.chatOrder, chat)
 	}
 	w.chatIndex[chat.GetJid()] = chat
+	w.scheduleChatRebuild()
+}
+
+// removeChat drops a chat the daemon no longer has, such as one merged into
+// another row.
+func (w *window) removeChat(jid string) {
+	existing, ok := w.chatIndex[jid]
+	if !ok {
+		return
+	}
+	delete(w.chatIndex, jid)
+	for i, c := range w.chatOrder {
+		if c == existing {
+			w.chatOrder = append(w.chatOrder[:i], w.chatOrder[i+1:]...)
+			break
+		}
+	}
 	w.scheduleChatRebuild()
 }
 

@@ -294,6 +294,12 @@ func (s *Service) GetConnectionState(_ context.Context, _ *zchatv1.GetConnection
 	return s.session.State(), nil
 }
 
+// GetSyncState reports full-sync progress so a client attaching mid-sync can
+// render the blocking progress screen immediately.
+func (s *Service) GetSyncState(_ context.Context, _ *zchatv1.GetSyncStateRequest) (*zchatv1.SyncState, error) {
+	return s.session.SyncState(), nil
+}
+
 // Logout unlinks the device and re-arms QR pairing.
 func (s *Service) Logout(ctx context.Context, _ *zchatv1.LogoutRequest) (*zchatv1.LogoutResponse, error) {
 	if err := s.session.Logout(ctx); err != nil {
@@ -390,8 +396,9 @@ func (s *Service) GetProfilePicture(ctx context.Context, req *zchatv1.GetProfile
 	return &zchatv1.GetProfilePictureResponse{Jid: jid, Path: path}, nil
 }
 
-// StreamEvents pushes live updates. The current connection state (and any
-// pending QR code) is sent first so an attaching client never has to poll.
+// StreamEvents pushes live updates. The current connection and full-sync state
+// (and any pending QR code) is sent first so an attaching client never has to
+// poll.
 func (s *Service) StreamEvents(_ *zchatv1.StreamEventsRequest, stream zchatv1.ChatService_StreamEventsServer) error {
 	events, unsubscribe := s.broker.Subscribe()
 	defer unsubscribe()
@@ -405,6 +412,12 @@ func (s *Service) StreamEvents(_ *zchatv1.StreamEventsRequest, stream zchatv1.Ch
 		if err := stream.Send(&zchatv1.Event{Payload: &zchatv1.Event_QrUpdated{QrUpdated: qr}}); err != nil {
 			return err
 		}
+	}
+
+	if err := stream.Send(&zchatv1.Event{
+		Payload: &zchatv1.Event_SyncState{SyncState: s.session.SyncState()},
+	}); err != nil {
+		return err
 	}
 
 	ctx := stream.Context()

@@ -141,6 +141,10 @@ CREATE TABLE IF NOT EXISTS media (
     duration INTEGER,
     payload BLOB
 );
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_jid ON messages(chat_jid);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at);
@@ -234,6 +238,39 @@ func (s *Store) DB() *sql.DB { return s.db }
 
 // Close releases the database.
 func (s *Store) Close() error { return s.db.Close() }
+
+// Meta returns a persisted key's value, or "" when the key is unset.
+func (s *Store) Meta(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read meta %q: %w", key, err)
+	}
+	return value, nil
+}
+
+// SetMeta stores a persisted key/value pair.
+func (s *Store) SetMeta(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value)
+	if err != nil {
+		return fmt.Errorf("write meta %q: %w", key, err)
+	}
+	return nil
+}
+
+// CountChats returns how many regular chats are stored.
+func (s *Store) CountChats(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM chats WHERE `+realChatFilter).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count chats: %w", err)
+	}
+	return n, nil
+}
 
 // chatColumns selects every chat field in the order scanChat expects.
 const chatColumns = `
@@ -389,6 +426,57 @@ func (s *Store) SetChatName(ctx context.Context, jid, name string) error {
 		return fmt.Errorf("set chat name %s: %w", jid, err)
 	}
 	return nil
+}
+
+// LIDChats returns chats stored under a WhatsApp LID rather than a phone JID.
+func (s *Store) LIDChats(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT jid FROM chats WHERE jid LIKE '%@lid'`)
+	if err != nil {
+		return nil, fmt.Errorf("scan lid chats: %w", err)
+	}
+	defer rows.Close()
+
+	var jids []string
+	for rows.Next() {
+		var jid string
+		if err := rows.Scan(&jid); err != nil {
+			return nil, fmt.Errorf("scan chat jid: %w", err)
+		}
+		jids = append(jids, jid)
+	}
+	return jids, rows.Err()
+}
+
+// MergeChat folds a duplicate chat row onto the JID it should have been stored
+// under, moving its messages across and combining the two rows. The target may
+// not exist yet, in which case the source row is simply re-keyed.
+func (s *Store) MergeChat(ctx context.Context, from, to string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("merge chat %s: %w", from, err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `UPDATE messages SET chat_jid = ? WHERE chat_jid = ?`, to, from); err != nil {
+		return fmt.Errorf("move messages of %s: %w", from, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO chats (jid, name, unread, archived, pinned, last_message, updated_at, is_group, muted_until)
+SELECT ?, name, unread, archived, pinned, last_message, updated_at, is_group, muted_until
+FROM chats WHERE jid = ?
+ON CONFLICT(jid) DO UPDATE SET
+    name = CASE WHEN chats.name != '' THEN chats.name ELSE excluded.name END,
+    unread = chats.unread + excluded.unread,
+    archived = chats.archived OR excluded.archived,
+    pinned = chats.pinned OR excluded.pinned,
+    last_message = CASE WHEN chats.last_message != '' THEN chats.last_message ELSE excluded.last_message END,
+    updated_at = MAX(chats.updated_at, excluded.updated_at)`, to, from); err != nil {
+		return fmt.Errorf("fold chat %s into %s: %w", from, to, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chats WHERE jid = ?`, from); err != nil {
+		return fmt.Errorf("drop merged chat %s: %w", from, err)
+	}
+	return tx.Commit()
 }
 
 // TouchChat records the newest message preview and optionally bumps the unread

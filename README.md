@@ -20,8 +20,8 @@ contract, build instructions, and packaging.
 ## Packaging
 
 ```bash
-make rpm VERSION=0.6.0
-make flatpak VERSION=0.6.0
+make rpm VERSION=0.7.0
+make flatpak VERSION=0.7.0
 ```
 
 Runtime data is stored under `~/.local/share/zchat/`, configuration under

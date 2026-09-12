@@ -25,6 +25,7 @@ service ChatService {
   rpc ReactMessage(ReactMessageRequest) returns (ReactMessageResponse);
   rpc GetChatInfo(GetChatInfoRequest) returns (GetChatInfoResponse);
   rpc GetProfilePicture(GetProfilePictureRequest) returns (GetProfilePictureResponse);
+  rpc GetSyncState(GetSyncStateRequest) returns (SyncState);
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
 }
 
@@ -110,6 +111,33 @@ message ConnectionState {
   string push_name = 3;
   string error = 4;
 }
+
+// SyncStage tracks the one-time full sync that follows a fresh pairing. The
+// client blocks its main view until the stage reaches DONE so chats and
+// contacts are complete before anything is rendered.
+enum SyncStage {
+  SYNC_STAGE_UNSPECIFIED = 0;
+  SYNC_STAGE_IDLE = 1;       // nothing to sync, or sync already finished
+  SYNC_STAGE_CONNECTING = 2;
+  SYNC_STAGE_CONTACTS = 3;
+  SYNC_STAGE_HISTORY = 4;
+  SYNC_STAGE_FINALIZING = 5;
+  SYNC_STAGE_DONE = 6;
+}
+
+// SyncState reports full-sync progress. progress is 0..1; when the daemon
+// cannot estimate it, indeterminate is set and progress is ignored.
+message SyncState {
+  SyncStage stage = 1;
+  double progress = 2;
+  bool indeterminate = 3;
+  string detail = 4;
+  int32 chats_synced = 5;
+  int32 messages_synced = 6;
+  int32 contacts_synced = 7;
+}
+
+message GetSyncStateRequest {}
 
 message GetChatsRequest {
   int32 limit = 1;
@@ -297,6 +325,10 @@ message GetProfilePictureResponse { string jid = 1; string path = 2; }
 // picture was removed.
 message ProfilePictureUpdate { string jid = 1; string path = 2; }
 
+// ChatDeleted announces that a chat row no longer exists, either because it was
+// merged into another chat or removed.
+message ChatDeleted { string jid = 1; }
+
 message Event {
   oneof payload {
     Message message_received = 1;
@@ -307,5 +339,7 @@ message Event {
     MessageDeleted message_deleted = 6;
     PresenceUpdate presence_changed = 7;
     ProfilePictureUpdate profile_picture_updated = 8;
+    SyncState sync_state = 9;
+    ChatDeleted chat_deleted = 10;
   }
 }

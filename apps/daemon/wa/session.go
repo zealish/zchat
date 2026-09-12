@@ -50,6 +50,7 @@ type Session struct {
 
 	presence *presenceTracker
 	avatars  *avatarCache
+	fullSync *syncTracker
 }
 
 // New builds a session sharing the daemon's SQLite handle with whatsmeow.
@@ -70,6 +71,8 @@ func New(ctx context.Context, db *sql.DB, st *daemonstore.Store, log zerolog.Log
 		presence:  newPresenceTracker(),
 		avatars:   newAvatarCache(),
 	}
+	s.fullSync = newSyncTracker(s)
+	s.fullSync.Load(ctx)
 	return s, nil
 }
 
@@ -102,10 +105,16 @@ func (s *Session) Start(ctx context.Context) error {
 		if err := client.Connect(); err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
+		// A fresh pairing starts from an empty database, so any earlier sync
+		// flag is cleared; the sync itself begins once pairing succeeds.
+		s.fullSync.Reset(ctx)
 		go s.consumeQR(qrChan)
 		return nil
 	}
 
+	// A device paired earlier may still have been interrupted mid-sync; Begin
+	// is a no-op once a full sync has completed.
+	s.fullSync.Begin()
 	s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTING, "")
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("connect: %w", err)
@@ -146,6 +155,7 @@ func (s *Session) Logout(ctx context.Context) error {
 	if err := client.Logout(ctx); err != nil {
 		return fmt.Errorf("logout: %w", err)
 	}
+	s.fullSync.Reset(ctx)
 	s.restart()
 	return nil
 }
@@ -169,6 +179,9 @@ func (s *Session) consumeQR(ch <-chan whatsmeow.QRChannelItem) {
 			s.mu.Lock()
 			s.qr = nil
 			s.mu.Unlock()
+			// Pairing succeeded: the full sync starts now and gates the UI
+			// until history and contacts have landed.
+			s.fullSync.Begin()
 			s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTING, "")
 		case "error":
 			msg := "pairing failed"
@@ -206,13 +219,15 @@ func (s *Session) handleEvent(evt any) {
 	switch e := evt.(type) {
 	case *events.Connected:
 		s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTED, "")
-		go s.backfillChatNames(ctx)
+		s.fullSync.Connected()
+		go s.reconcileChats(ctx)
 	case *events.Disconnected:
 		// Subscriptions and chat states do not survive a reconnect.
 		s.presence.reset()
 		s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_DISCONNECTED, "")
 	case *events.LoggedOut:
 		s.log.Warn().Str("reason", e.Reason.String()).Msg("logged out by server")
+		s.fullSync.Reset(ctx)
 		s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_LOGGED_OUT, e.Reason.String())
 		s.restart()
 	case *events.Message:
@@ -243,9 +258,23 @@ func (s *Session) handleEvent(evt any) {
 		s.onDeleteForMe(ctx, e)
 	case *events.Picture:
 		s.onPictureChanged(ctx, e)
+	case *events.AppStateSyncComplete:
+		s.log.Info().Str("patch", string(e.Name)).Msg("app state sync complete")
+		s.onAppStateSyncComplete(ctx)
 	case *events.OfflineSyncCompleted:
 		s.log.Info().Int("count", e.Count).Msg("offline sync completed")
 	}
+}
+
+// onAppStateSyncComplete reports how many contacts the app-state sync landed,
+// which is the only contact-side progress signal whatsmeow exposes.
+func (s *Session) onAppStateSyncComplete(ctx context.Context) {
+	contacts, err := s.GetContacts(ctx)
+	if err != nil {
+		s.log.Warn().Err(err).Msg("count synced contacts")
+		return
+	}
+	s.fullSync.Contacts(len(contacts))
 }
 
 func (s *Session) restart() {
@@ -258,6 +287,49 @@ func (s *Session) restart() {
 			s.log.Error().Err(err).Msg("restart session")
 		}
 	}()
+}
+
+// reconcileChats repairs chat rows the sync could not key correctly: LID rows
+// that duplicate a contact already known by phone number, and names that were
+// still bare phone numbers when the row was written.
+func (s *Session) reconcileChats(ctx context.Context) {
+	s.mergeLIDChats(ctx)
+	s.backfillChatNames(ctx)
+}
+
+// mergeLIDChats folds chats stored under a LID onto their phone JID, which is
+// where their messages live. History sync addresses many conversations by LID,
+// so without this the same contact appears twice in the chat list.
+func (s *Session) mergeLIDChats(ctx context.Context) {
+	chats, err := s.store.LIDChats(ctx)
+	if err != nil {
+		s.log.Warn().Err(err).Msg("scan lid chats")
+		return
+	}
+
+	merged := 0
+	for _, chatJID := range chats {
+		jid, err := types.ParseJID(chatJID)
+		if err != nil {
+			continue
+		}
+		canonical := s.canonicalChatJID(ctx, jid)
+		if canonical == chatJID {
+			continue
+		}
+		if err := s.store.MergeChat(ctx, chatJID, canonical); err != nil {
+			s.log.Warn().Err(err).Str("chat", chatJID).Msg("merge lid chat")
+			continue
+		}
+		merged++
+		s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_ChatDeleted{
+			ChatDeleted: &zchatv1.ChatDeleted{Jid: chatJID},
+		}})
+		s.publishChat(ctx, canonical)
+	}
+	if merged > 0 {
+		s.log.Info().Int("merged", merged).Int("scanned", len(chats)).Msg("lid chats merged")
+	}
 }
 
 // backfillChatNames repairs chats stored with a bare phone number as their
@@ -486,7 +558,7 @@ func (s *Session) persistMessage(ctx context.Context, info types.MessageInfo, ms
 // resolveChatName picks the best available display name for a chat, preferring
 // the stored one so history-sync names are not overwritten.
 func (s *Session) resolveChatName(ctx context.Context, jid types.JID, isGroup bool) string {
-	chatJID := jid.ToNonAD().String()
+	chatJID := s.canonicalChatJID(ctx, jid)
 	if name, err := s.store.ChatName(ctx, chatJID); err == nil && name != "" && name != jid.User {
 		return name
 	}
