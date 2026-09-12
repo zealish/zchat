@@ -66,11 +66,6 @@ func (s *Session) processHistorySync(ctx context.Context, evt *events.HistorySyn
 		if chat.Name == "" {
 			chat.Name = s.resolveChatName(ctx, jid, isGroup)
 		}
-		if err := s.store.UpsertChat(ctx, chat); err != nil {
-			s.log.Warn().Err(err).Str("chat", chatJID).Msg("upsert conversation")
-			continue
-		}
-
 		batch := make([]daemonstore.Message, 0, len(conv.GetMessages()))
 		for _, hsMsg := range conv.GetMessages() {
 			parsed, err := client.ParseWebMessage(jid, hsMsg.GetMessage())
@@ -82,17 +77,13 @@ func (s *Session) processHistorySync(ctx context.Context, evt *events.HistorySyn
 				batch = append(batch, row)
 			}
 		}
-		if err := s.store.InsertMessages(ctx, batch); err != nil {
-			s.log.Warn().Err(err).Str("chat", chatJID).Msg("insert history messages")
-		}
 
-		if err := s.store.RefreshLastMessage(ctx, chatJID); err != nil {
-			s.log.Warn().Err(err).Str("chat", chatJID).Msg("refresh preview")
-		}
-		// The unread counter must mirror the phone, so restore the synced value
-		// after persistMessage's per-message bookkeeping.
-		if err := s.store.UpsertChat(ctx, chat); err != nil {
-			s.log.Warn().Err(err).Str("chat", chatJID).Msg("restore unread count")
+		// The chat row, its messages and the refreshed preview land in one
+		// transaction. The synced unread count is written as part of it, so it
+		// survives without a second upsert.
+		if err := s.store.SyncConversation(ctx, chat, batch); err != nil {
+			s.log.Warn().Err(err).Str("chat", chatJID).Msg("sync conversation")
+			continue
 		}
 
 		stored, err := s.store.GetChat(ctx, chatJID)

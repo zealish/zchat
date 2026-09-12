@@ -50,6 +50,7 @@ type Session struct {
 
 	presence *presenceTracker
 	avatars  *avatarCache
+	names    *nameCache
 	fullSync *syncTracker
 }
 
@@ -70,6 +71,7 @@ func New(ctx context.Context, db *sql.DB, st *daemonstore.Store, log zerolog.Log
 		historyCh: make(chan *events.HistorySync, 8),
 		presence:  newPresenceTracker(),
 		avatars:   newAvatarCache(),
+		names:     newNameCache(),
 	}
 	s.fullSync = newSyncTracker(s)
 	s.fullSync.Load(ctx)
@@ -156,6 +158,7 @@ func (s *Session) Logout(ctx context.Context) error {
 		return fmt.Errorf("logout: %w", err)
 	}
 	s.fullSync.Reset(ctx)
+	s.names.reset()
 	s.restart()
 	return nil
 }
@@ -228,8 +231,15 @@ func (s *Session) handleEvent(evt any) {
 	case *events.LoggedOut:
 		s.log.Warn().Str("reason", e.Reason.String()).Msg("logged out by server")
 		s.fullSync.Reset(ctx)
+		s.names.reset()
 		s.setState(zchatv1.ConnectionStatus_CONNECTION_STATUS_LOGGED_OUT, e.Reason.String())
 		s.restart()
+	case *events.Contact:
+		s.names.drop(e.JID)
+	case *events.PushName:
+		s.names.drop(e.JID)
+	case *events.BusinessName:
+		s.names.drop(e.JID)
 	case *events.Message:
 		s.onMessage(ctx, e)
 	case *events.Receipt:
@@ -587,14 +597,20 @@ func (s *Session) displayNumber(ctx context.Context, jid types.JID) string {
 	if jid.Server != types.HiddenUserServer {
 		return jid.User
 	}
+	key := jid.ToNonAD().String()
+	if cached, ok := s.names.number(key); ok {
+		return cached
+	}
+
+	number := jid.User
 	client := s.currentClient()
-	if client == nil || client.Store == nil {
-		return jid.User
+	if client != nil && client.Store != nil {
+		if pn, err := client.Store.GetAltJID(ctx, jid.ToNonAD()); err == nil && !pn.IsEmpty() && pn.User != "" {
+			number = pn.User
+		}
 	}
-	if pn, err := client.Store.GetAltJID(ctx, jid.ToNonAD()); err == nil && !pn.IsEmpty() && pn.User != "" {
-		return pn.User
-	}
-	return jid.User
+	s.names.putNumber(key, number)
+	return number
 }
 
 // DisplayName resolves a sender JID to a contact name, falling back to the
@@ -618,11 +634,18 @@ func (s *Session) contactName(ctx context.Context, jid types.JID) string {
 		return ""
 	}
 
+	key := jid.ToNonAD().String()
+	if cached, ok := s.names.name(key); ok {
+		return cached
+	}
+
 	candidates := []types.JID{jid.ToNonAD()}
 	if alt, err := client.Store.GetAltJID(ctx, jid.ToNonAD()); err == nil && !alt.IsEmpty() {
 		candidates = append(candidates, alt.ToNonAD())
 	}
 
+	resolved := ""
+found:
 	for _, candidate := range candidates {
 		contact, err := client.Store.Contacts.GetContact(ctx, candidate)
 		if err != nil || !contact.Found {
@@ -630,11 +653,13 @@ func (s *Session) contactName(ctx context.Context, jid types.JID) string {
 		}
 		for _, name := range []string{contact.FullName, contact.BusinessName, contact.PushName} {
 			if name != "" {
-				return name
+				resolved = name
+				break found
 			}
 		}
 	}
-	return ""
+	s.names.putName(key, resolved)
+	return resolved
 }
 
 // GetContacts returns locally synced contacts, including contacts without chats.

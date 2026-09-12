@@ -94,8 +94,12 @@ type Media struct {
 }
 
 // Store owns the database handle shared with whatsmeow's session store.
+//
+// Reads go to a separate read-only pool so a query never queues behind the
+// single writer, which history sync keeps busy for minutes at a time.
 type Store struct {
 	db *sql.DB
+	ro *sql.DB
 }
 
 const schema = `
@@ -145,14 +149,30 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_messages_chat_jid ON messages(chat_jid);
-CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
-CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_chats_order ON chats(archived, pinned DESC, updated_at DESC);
+
+-- Superseded by the composite indexes above, which lead with the same column.
+-- Dropping them removes write amplification on every message and chat insert.
+DROP INDEX IF EXISTS idx_messages_chat_jid;
+DROP INDEX IF EXISTS idx_messages_timestamp;
+DROP INDEX IF EXISTS idx_chats_updated_at;
 `
+
+// pragmas tunes SQLite for a desktop workload: NORMAL sync is safe under WAL,
+// and the default 2MB cache with no mmap makes every chat-list scan hit the
+// filesystem.
+const pragmas = `&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)` +
+	`&_pragma=synchronous(NORMAL)&_pragma=cache_size(-32000)` +
+	`&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)`
+
+// readConns bounds the reader pool. WAL allows readers to run concurrently
+// with the single writer, so queries never queue behind a history-sync write.
+const readConns = 4
 
 // Open opens (creating if needed) the database at path and applies the schema.
 func Open(ctx context.Context, path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)%s", path, pragmas)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -171,7 +191,24 @@ func Open(ctx context.Context, path string) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{db: db}, nil
+	// Without statistics the planner falls back to guesses and picks a table
+	// scan over the chat-ordering index. optimize only re-analyses what has
+	// changed, so it is cheap on every start after the first.
+	if _, err := db.ExecContext(ctx, `PRAGMA optimize`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("optimize database: %w", err)
+	}
+
+	// query_only makes the reader pool's read-only intent enforced rather than
+	// conventional, so a stray write can never bypass the single writer.
+	ro, err := sql.Open("sqlite", dsn+"&_pragma=query_only(true)")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open reader pool: %w", err)
+	}
+	ro.SetMaxOpenConns(readConns)
+
+	return &Store{db: db, ro: ro}, nil
 }
 
 // addedColumns lists columns added after a table's first release. Existing
@@ -237,12 +274,14 @@ func migrateColumns(ctx context.Context, db *sql.DB, table string, cols []struct
 func (s *Store) DB() *sql.DB { return s.db }
 
 // Close releases the database.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	return errors.Join(s.ro.Close(), s.db.Close())
+}
 
 // Meta returns a persisted key's value, or "" when the key is unset.
 func (s *Store) Meta(ctx context.Context, key string) (string, error) {
 	var value string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&value)
+	err := s.ro.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -266,7 +305,7 @@ func (s *Store) SetMeta(ctx context.Context, key, value string) error {
 // CountChats returns how many regular chats are stored.
 func (s *Store) CountChats(ctx context.Context) (int, error) {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM chats WHERE `+realChatFilter).Scan(&n); err != nil {
+	if err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM chats WHERE `+realChatFilter).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count chats: %w", err)
 	}
 	return n, nil
@@ -292,7 +331,14 @@ func scanChat(sc interface{ Scan(...any) error }) (Chat, error) {
 // UpsertChat inserts or updates a chat, preserving an existing name when the
 // incoming one is empty.
 func (s *Store) UpsertChat(ctx context.Context, c Chat) error {
-	_, err := s.db.ExecContext(ctx, `
+	if err := upsertChatTx(ctx, s.db, c); err != nil {
+		return err
+	}
+	return nil
+}
+
+func upsertChatTx(ctx context.Context, ex execer, c Chat) error {
+	_, err := ex.ExecContext(ctx, `
 INSERT INTO chats (jid, name, unread, archived, pinned, last_message, updated_at, is_group, muted_until)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(jid) DO UPDATE SET
@@ -311,11 +357,38 @@ ON CONFLICT(jid) DO UPDATE SET
 	return nil
 }
 
+// SyncConversation ingests one history-sync conversation: the chat row, its
+// message batch and the refreshed preview, in a single transaction.
+//
+// Run as four separate statements this cost four commits per conversation, and
+// a full sync carries hundreds of them. The chat row is written before the
+// messages so the preview refresh sees the batch.
+func (s *Store) SyncConversation(ctx context.Context, c Chat, msgs []Message) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sync %s: %w", c.JID, err)
+	}
+	defer tx.Rollback()
+
+	if err := upsertChatTx(ctx, tx, c); err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		if err := insertMessageTx(ctx, tx, m); err != nil {
+			return err
+		}
+	}
+	if err := refreshLastMessageTx(ctx, tx, c.JID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ListChats returns regular direct and group chats, ordered pinned first, then
 // most recently updated. Archived chats live on their own list, so archived
 // selects which of the two is returned.
 func (s *Store) ListChats(ctx context.Context, limit, offset int, archived bool) ([]Chat, error) {
-	rows, err := s.db.QueryContext(ctx, chatColumns+`
+	rows, err := s.ro.QueryContext(ctx, chatColumns+`
 WHERE `+realChatFilter+` AND archived = ?
 ORDER BY pinned DESC, updated_at DESC
 LIMIT ? OFFSET ?`, archived, limit, offset)
@@ -374,7 +447,7 @@ func (s *Store) SetChatFlags(ctx context.Context, jid string, pinned, archived *
 
 // GetChat loads a single chat.
 func (s *Store) GetChat(ctx context.Context, jid string) (Chat, error) {
-	c, err := scanChat(s.db.QueryRowContext(ctx, chatColumns+` WHERE jid = ?`, jid))
+	c, err := scanChat(s.ro.QueryRowContext(ctx, chatColumns+` WHERE jid = ?`, jid))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Chat{}, ErrNotFound
 	}
@@ -387,7 +460,7 @@ func (s *Store) GetChat(ctx context.Context, jid string) (Chat, error) {
 // ChatName returns the stored display name, or "" when the chat is unknown.
 func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 	var name string
-	err := s.db.QueryRowContext(ctx, `SELECT name FROM chats WHERE jid = ?`, jid).Scan(&name)
+	err := s.ro.QueryRowContext(ctx, `SELECT name FROM chats WHERE jid = ?`, jid).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -400,7 +473,7 @@ func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 // ChatsNamedByNumber returns direct chats whose stored name is still just the
 // JID user part, meaning no contact name was available when they were created.
 func (s *Store) ChatsNamedByNumber(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 SELECT jid FROM chats
 WHERE is_group = FALSE AND (name = '' OR name = SUBSTR(jid, 1, INSTR(jid, '@') - 1))`)
 	if err != nil {
@@ -430,7 +503,7 @@ func (s *Store) SetChatName(ctx context.Context, jid, name string) error {
 
 // LIDChats returns chats stored under a WhatsApp LID rather than a phone JID.
 func (s *Store) LIDChats(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT jid FROM chats WHERE jid LIKE '%@lid'`)
+	rows, err := s.ro.QueryContext(ctx, `SELECT jid FROM chats WHERE jid LIKE '%@lid'`)
 	if err != nil {
 		return nil, fmt.Errorf("scan lid chats: %w", err)
 	}
@@ -504,7 +577,11 @@ ON CONFLICT(jid) DO UPDATE SET
 
 // RefreshLastMessage resets the preview from the newest stored message.
 func (s *Store) RefreshLastMessage(ctx context.Context, jid string) error {
-	_, err := s.db.ExecContext(ctx, `
+	return refreshLastMessageTx(ctx, s.db, jid)
+}
+
+func refreshLastMessageTx(ctx context.Context, ex execer, jid string) error {
+	_, err := ex.ExecContext(ctx, `
 UPDATE chats
 SET last_message = COALESCE((SELECT body FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1), last_message)
 WHERE jid = ?`, jid, jid)
@@ -532,7 +609,7 @@ type MessageRef struct {
 
 // RecentIncoming returns the newest incoming messages of a chat, newest first.
 func (s *Store) RecentIncoming(ctx context.Context, chatJID string, limit int) ([]MessageRef, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 SELECT id, COALESCE(sender, '') FROM messages
 WHERE chat_jid = ? AND outgoing = FALSE
 ORDER BY timestamp DESC
@@ -665,7 +742,7 @@ func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
 // ListMessages returns messages in chronological order, newest page first when
 // before is non-zero.
 func (s *Store) ListMessages(ctx context.Context, chatJID string, limit int, before int64) ([]Message, error) {
-	rows, err := s.db.QueryContext(ctx, messageColumns+`
+	rows, err := s.ro.QueryContext(ctx, messageColumns+`
 WHERE m.chat_jid = ? AND (? = 0 OR m.timestamp < ?)
 ORDER BY m.timestamp DESC
 LIMIT ?`, chatJID, before, before, limit)
@@ -694,7 +771,7 @@ LIMIT ?`, chatJID, before, before, limit)
 
 // GetMessage loads a single message.
 func (s *Store) GetMessage(ctx context.Context, id string) (Message, error) {
-	m, err := scanMessage(s.db.QueryRowContext(ctx, messageColumns+` WHERE m.id = ?`, id))
+	m, err := scanMessage(s.ro.QueryRowContext(ctx, messageColumns+` WHERE m.id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound
 	}
@@ -729,7 +806,7 @@ func (s *Store) DeleteMessage(ctx context.Context, id string) error {
 // MediaPayload returns the stored waE2E payload needed to decrypt a message's
 // attachment, plus the local path when it was already downloaded.
 func (s *Store) MediaPayload(ctx context.Context, messageID string) (payload []byte, path string, err error) {
-	err = s.db.QueryRowContext(ctx,
+	err = s.ro.QueryRowContext(ctx,
 		`SELECT COALESCE(payload, X''), COALESCE(path, '') FROM media WHERE id = ?`, messageID).
 		Scan(&payload, &path)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -757,7 +834,7 @@ func (s *Store) SetMediaPath(ctx context.Context, messageID, path string, size i
 func (s *Store) SearchChats(ctx context.Context, query string, limit int) ([]Chat, error) {
 	// LIKE with an escaped pattern keeps the caller's wildcards literal.
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := s.db.QueryContext(ctx, chatColumns+`
+	rows, err := s.ro.QueryContext(ctx, chatColumns+`
 WHERE `+realChatFilter+`
   AND (name LIKE ? ESCAPE '\' OR COALESCE(last_message, '') LIKE ? ESCAPE '\')
 ORDER BY pinned DESC, updated_at DESC
@@ -782,7 +859,7 @@ LIMIT ?`, pattern, pattern, limit)
 // chatJID scopes the search to one conversation; empty searches every chat.
 func (s *Store) SearchMessages(ctx context.Context, query, chatJID string, limit int) ([]Message, error) {
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := s.db.QueryContext(ctx, messageColumns+`
+	rows, err := s.ro.QueryContext(ctx, messageColumns+`
 WHERE (? = '' OR m.chat_jid = ?)
   AND COALESCE(m.body, '') LIKE ? ESCAPE '\'
 ORDER BY m.timestamp DESC
