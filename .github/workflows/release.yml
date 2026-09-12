@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     # Adw.ToggleGroup in window.blp needs libadwaita 1.7+, newer than the
     # runner image ships. Fedora's GNOME 48 packages are new enough.
-    container: fedora:42
+    container: fedora:44
     steps:
       - name: Install build dependencies
         run: |
