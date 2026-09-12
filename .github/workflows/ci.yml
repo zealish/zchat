@@ -7,15 +7,15 @@ on:
 jobs:
   go:
     runs-on: ubuntu-latest
+    # Adw.ToggleGroup in window.blp needs libadwaita 1.7+, newer than the
+    # runner image ships. Fedora's GNOME 48 packages are new enough.
+    container: fedora:42
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-      - name: Install GTK build dependencies
+      - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev blueprint-compiler
+          dnf install -y golang gcc git make \
+            gtk4-devel libadwaita-devel blueprint-compiler
+      - uses: actions/checkout@v4
       - name: Generate UI resources
         run: make ui
       - run: go test ./...
