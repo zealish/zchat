@@ -88,7 +88,11 @@ func (c *Client) GetChats(ctx context.Context, archived bool, onDone func(bool, 
 		defer cancel()
 
 		resp, err := c.svc.GetChats(callCtx, &zchatv1.GetChatsRequest{Archived: archived})
-		idle(func() { onDone(archived, resp.GetChats(), err) })
+		var chats []*zchatv1.Chat
+		if resp != nil {
+			chats = resp.GetChats()
+		}
+		idle(func() { onDone(archived, chats, err) })
 	}()
 }
 
@@ -223,7 +227,11 @@ func (c *Client) SearchChats(ctx context.Context, query string, onDone func(stri
 		defer cancel()
 
 		resp, err := c.svc.SearchChats(callCtx, &zchatv1.SearchChatsRequest{Query: query})
-		idle(func() { onDone(query, resp.GetChats(), err) })
+		var chats []*zchatv1.Chat
+		if resp != nil {
+			chats = resp.GetChats()
+		}
+		idle(func() { onDone(query, chats, err) })
 	}()
 }
 
@@ -232,7 +240,37 @@ func (c *Client) SearchChats(ctx context.Context, query string, onDone func(stri
 func (c *Client) DownloadMedia(ctx context.Context, messageID string, onDone func(*zchatv1.Message, error)) {
 	go func() {
 		resp, err := c.svc.DownloadMedia(ctx, &zchatv1.DownloadMediaRequest{MessageId: messageID})
-		idle(func() { onDone(resp.GetMessage(), err) })
+		var msg *zchatv1.Message
+		if resp != nil {
+			msg = resp.GetMessage()
+		}
+		idle(func() { onDone(msg, err) })
+	}()
+}
+
+// RetryMessage resends a failed outgoing text message without blocking GTK.
+func (c *Client) RetryMessage(ctx context.Context, messageID string, onDone func(*zchatv1.Message, error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		resp, err := c.svc.RetryMessage(callCtx, &zchatv1.RetryMessageRequest{MessageId: messageID})
+		var msg *zchatv1.Message
+		if resp != nil {
+			msg = resp.GetMessage()
+		}
+		idle(func() { onDone(msg, err) })
+	}()
+}
+
+// RetryMedia resends a failed outgoing attachment without blocking GTK.
+func (c *Client) RetryMedia(ctx context.Context, messageID string, onDone func(*zchatv1.Message, error)) {
+	go func() {
+		resp, err := c.svc.RetryMedia(ctx, &zchatv1.RetryMessageRequest{MessageId: messageID})
+		var msg *zchatv1.Message
+		if resp != nil {
+			msg = resp.GetMessage()
+		}
+		idle(func() { onDone(msg, err) })
 	}()
 }
 
@@ -251,12 +289,31 @@ func (c *Client) SetPresence(ctx context.Context, chatJID string, typing, availa
 	}()
 }
 
+// Logout unlinks the device off the main loop.
+func (c *Client) Logout(ctx context.Context, onDone func(error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		_, err := c.svc.Logout(callCtx, &zchatv1.LogoutRequest{})
+		idle(func() { onDone(err) })
+	}()
+}
+
 func (c *Client) GetChatInfo(ctx context.Context, chatJID string, onDone func(*zchatv1.GetChatInfoResponse, error)) {
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 		defer cancel()
 		resp, err := c.svc.GetChatInfo(callCtx, &zchatv1.GetChatInfoRequest{ChatJid: chatJID})
 		idle(func() { onDone(resp, err) })
+	}()
+}
+
+// GetProfilePicture resolves an avatar path off the main loop. The daemon may
+// have to download the image, so it gets the longer media timeout.
+func (c *Client) GetProfilePicture(ctx context.Context, jid string, onDone func(string, string, error)) {
+	go func() {
+		resp, err := c.svc.GetProfilePicture(ctx, &zchatv1.GetProfilePictureRequest{Jid: jid})
+		idle(func() { onDone(jid, resp.GetPath(), err) })
 	}()
 }
 

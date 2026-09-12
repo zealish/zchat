@@ -20,8 +20,10 @@ service ChatService {
   rpc SearchChats(SearchChatsRequest) returns (SearchChatsResponse);
   rpc SetPresence(SetPresenceRequest) returns (SetPresenceResponse);
   rpc RetryMessage(RetryMessageRequest) returns (RetryMessageResponse);
+  rpc RetryMedia(RetryMessageRequest) returns (RetryMediaResponse);
   rpc ReactMessage(ReactMessageRequest) returns (ReactMessageResponse);
   rpc GetChatInfo(GetChatInfoRequest) returns (GetChatInfoResponse);
+  rpc GetProfilePicture(GetProfilePictureRequest) returns (GetProfilePictureResponse);
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
 }
 
@@ -259,12 +261,28 @@ message RetryMessageResponse {
   Message message = 1;
 }
 
+message RetryMediaResponse {
+  Message message = 1;
+}
+
 message SetPresenceResponse {}
 message ReactMessageRequest { string message_id = 1; string emoji = 2; }
 message ReactMessageResponse { Message message = 1; }
 
 message GetChatInfoRequest { string chat_jid = 1; }
 message GetChatInfoResponse { Chat chat = 1; repeated Contact members = 2; }
+
+// GetProfilePictureRequest asks for a contact's or group's avatar. The daemon
+// caches the image on disk and returns its local path.
+message GetProfilePictureRequest { string jid = 1; }
+
+// GetProfilePictureResponse carries the cached avatar path, empty when the
+// target has no picture set.
+message GetProfilePictureResponse { string jid = 1; string path = 2; }
+
+// ProfilePictureUpdate announces that an avatar changed. path is empty when the
+// picture was removed.
+message ProfilePictureUpdate { string jid = 1; string path = 2; }
 
 message Event {
   oneof payload {
@@ -275,5 +293,6 @@ message Event {
     ConnectionState connection_state = 5;
     MessageDeleted message_deleted = 6;
     PresenceUpdate presence_changed = 7;
+    ProfilePictureUpdate profile_picture_updated = 8;
   }
 }

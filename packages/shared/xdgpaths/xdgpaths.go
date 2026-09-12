@@ -65,6 +65,16 @@ func MediaDir() (string, error) {
 	return ensure(base, "media")
 }
 
+// AvatarDir returns ~/.cache/zchat/avatars. Profile pictures are cheap to
+// re-fetch, so they live in the cache rather than the data directory.
+func AvatarDir() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return ensure(base, "avatars")
+}
+
 // DatabasePath returns the path of the shared SQLite database.
 func DatabasePath() (string, error) {
 	dir, err := DataDir()

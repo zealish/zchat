@@ -10,6 +10,7 @@ import (
 	"github.com/diamondburned/gotk4-adwaita/pkg/adw"
 	"github.com/diamondburned/gotk4/pkg/core/gioutil"
 	coreglib "github.com/diamondburned/gotk4/pkg/core/glib"
+	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gdkpixbuf/v2"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
@@ -42,6 +43,7 @@ type window struct {
 	splitView      *adw.NavigationSplitView
 	contentPage    *adw.NavigationPage
 	contentTitle   *adw.WindowTitle
+	headerAvatar   *adw.Avatar
 	chatList       *gtk.ListView
 	chatFilter     *adw.ToggleGroup
 	messageList    *gtk.ListView
@@ -52,8 +54,11 @@ type window struct {
 	attachButton   *gtk.Button
 	newChatButton  *gtk.Button
 	chatInfoButton *gtk.Button
+	settingsButton *gtk.Button
 	newChatDialog  *adw.Dialog
 	connected      bool
+	ownJID         string
+	connStatus     string
 	replyBar       *gtk.Box
 	replySender    *gtk.Label
 	replyBody      *gtk.Label
@@ -87,6 +92,8 @@ type window struct {
 	idleTimer         glib.SourceHandle
 	animCache         map[string]*animation
 	animTimers        map[*gtk.Picture]glib.SourceHandle
+	avatars           map[string]*gdk.Texture
+	avatarRows        map[*adw.Avatar]string
 
 	client      *client.Client
 	activeChat  string
@@ -117,6 +124,7 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		mainStack:      builder.GetObject("main_stack").Cast().(*gtk.Stack),
 		qrImage:        builder.GetObject("qr_image").Cast().(*gtk.Picture),
 		splitView:      builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
+		headerAvatar:   builder.GetObject("header_avatar").Cast().(*adw.Avatar),
 		contentPage:    builder.GetObject("content_page").Cast().(*adw.NavigationPage),
 		contentTitle:   builder.GetObject("content_title").Cast().(*adw.WindowTitle),
 		chatList:       builder.GetObject("chat_list").Cast().(*gtk.ListView),
@@ -129,6 +137,7 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		attachButton:   builder.GetObject("attach_button").Cast().(*gtk.Button),
 		newChatButton:  builder.GetObject("new_chat_button").Cast().(*gtk.Button),
 		chatInfoButton: builder.GetObject("chat_info_button").Cast().(*gtk.Button),
+		settingsButton: builder.GetObject("settings_button").Cast().(*gtk.Button),
 
 		replyBar:    builder.GetObject("reply_bar").Cast().(*gtk.Box),
 		replySender: builder.GetObject("reply_sender").Cast().(*gtk.Label),
@@ -151,12 +160,15 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		typingTimers:  make(map[string]glib.SourceHandle),
 		animCache:     make(map[string]*animation),
 		animTimers:    make(map[*gtk.Picture]glib.SourceHandle),
+		avatars:       make(map[string]*gdk.Texture),
+		avatarRows:    make(map[*adw.Avatar]string),
 	}
 
 	w.win.SetApplication(&app.Application)
 	w.setupChatList()
 	w.newChatButton.ConnectClicked(func() { w.showNewChatDialog() })
 	w.chatInfoButton.ConnectClicked(func() { w.showChatInfo() })
+	w.settingsButton.ConnectClicked(func() { w.showSettings() })
 	w.setupMessageList()
 	w.setupComposer()
 	w.setupSearch()
@@ -326,11 +338,15 @@ func (w *window) onEvent(evt *zchatv1.Event) {
 		w.onMessageDeleted(payload.MessageDeleted)
 	case *zchatv1.Event_PresenceChanged:
 		w.onPresence(payload.PresenceChanged)
+	case *zchatv1.Event_ProfilePictureUpdated:
+		w.onProfilePictureUpdated(payload.ProfilePictureUpdated)
 	}
 }
 
 func (w *window) onConnectionState(state *zchatv1.ConnectionState) {
 	w.connected = state.GetStatus() == zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTED
+	w.ownJID = state.GetOwnJid()
+	w.connStatus = state.GetStatus().String()
 	if w.connected {
 		w.mainStack.SetVisibleChildName("chat")
 		w.loadChats()
@@ -569,6 +585,7 @@ func (w *window) setupChatList() {
 
 		display := displayName(chat)
 		avatar.SetText(display)
+		w.bindAvatar(avatar, chat.GetJid())
 		name.SetText(display)
 		preview.SetText(chat.GetLastMessage())
 
@@ -581,6 +598,11 @@ func (w *window) setupChatList() {
 		} else {
 			unread.SetVisible(false)
 		}
+	})
+	factory.ConnectUnbind(func(obj *coreglib.Object) {
+		item := obj.Cast().(*gtk.ListItem)
+		row := item.Child().(*gtk.Box)
+		w.unbindAvatar(row.FirstChild().(*adw.Avatar))
 	})
 	w.chatList.SetFactory(&factory.ListItemFactory)
 
@@ -613,6 +635,8 @@ func (w *window) openChat(chat *zchatv1.Chat) {
 	w.cancelAttachment()
 	w.contentPage.SetTitle(displayName(chat))
 	w.contentTitle.SetTitle(displayName(chat))
+	w.headerAvatar.SetText(displayName(chat))
+	w.bindAvatar(w.headerAvatar, chat.GetJid())
 	w.refreshSubtitle()
 	clear(w.messageRows)
 	w.messages.Splice(0, w.messages.Len())

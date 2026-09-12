@@ -12,6 +12,7 @@ import (
 	"github.com/diamondburned/gotk4/pkg/pango"
 
 	zchatv1 "github.com/zealish/zchat/packages/ipc/zchatv1"
+	"github.com/zealish/zchat/packages/shared/xdgpaths"
 )
 
 // muteForever is the muted_until value the daemon uses for an indefinite mute.
@@ -143,6 +144,13 @@ func (w *window) messageMenuEntries(msg *zchatv1.Message) []menuEntry {
 		{label: "Delete for me", destroy: true, run: func() { w.deleteMessage(id, false) }},
 	}
 	if msg.GetOutgoing() {
+		if msg.GetStatus() == zchatv1.MessageStatus_MESSAGE_STATUS_FAILED {
+			if msg.GetType() == "text" {
+				entries = append(entries, menuEntry{label: "Retry sending", run: func() { w.retryMessage(id) }})
+			} else if msg.GetMedia() != nil {
+				entries = append(entries, menuEntry{label: "Retry sending", run: func() { w.retryMediaMessage(id) }})
+			}
+		}
 		entries = append(entries, menuEntry{
 			label:   "Delete for everyone",
 			destroy: true,
@@ -150,6 +158,38 @@ func (w *window) messageMenuEntries(msg *zchatv1.Message) []menuEntry {
 		})
 	}
 	return entries
+}
+
+func (w *window) retryMediaMessage(id string) {
+	if w.client == nil {
+		return
+	}
+	w.client.RetryMedia(w.ctx, id, func(msg *zchatv1.Message, err error) {
+		if err != nil {
+			w.log.Error().Err(err).Str("id", id).Msg("retry media")
+			w.toast("Attachment could not be sent")
+			return
+		}
+		if msg != nil {
+			w.onMessage(msg, true)
+		}
+	})
+}
+
+func (w *window) retryMessage(id string) {
+	if w.client == nil {
+		return
+	}
+	w.client.RetryMessage(w.ctx, id, func(msg *zchatv1.Message, err error) {
+		if err != nil {
+			w.log.Error().Err(err).Str("id", id).Msg("retry message")
+			w.toast("Message could not be sent")
+			return
+		}
+		if msg != nil {
+			w.onMessage(msg, true)
+		}
+	})
 }
 
 func (w *window) copyText(text string) {
@@ -356,7 +396,56 @@ func (w *window) showChatInfo() {
 			body += fmt.Sprintf("\n\nMembers: %d", len(resp.GetMembers()))
 		}
 		dialog := adw.NewAlertDialog("Chat information", body)
+
+		avatar := adw.NewAvatar(96, title, true)
+		w.bindAvatar(avatar, chat.GetJid())
+		dialog.SetExtraChild(avatar)
+		dialog.ConnectClosed(func() { w.unbindAvatar(avatar) })
+
 		dialog.AddResponse("close", "Close")
 		dialog.Present(w.win)
+	})
+}
+
+// showSettings presents device information, storage locations, and logout.
+func (w *window) showSettings() {
+	jid := w.ownJID
+	if jid == "" {
+		jid = "Not linked"
+	}
+	status := w.connStatus
+	if status == "" {
+		status = "UNKNOWN"
+	}
+	dataDir, _ := xdgpaths.DataDir()
+	cacheDir, _ := xdgpaths.CacheDir()
+	mediaDir, _ := xdgpaths.MediaDir()
+
+	body := fmt.Sprintf(
+		"Device: %s\nConnection: %s\nSocket: %s\n\nData: %s\nCache: %s\nMedia: %s",
+		jid, status, w.sock, dataDir, cacheDir, mediaDir,
+	)
+
+	dialog := adw.NewAlertDialog("Settings", body)
+	dialog.AddResponse("close", "Close")
+	dialog.AddResponse("logout", "Log out")
+	dialog.SetResponseAppearance("logout", adw.ResponseDestructive)
+	dialog.ConnectResponse(func(response string) {
+		if response == "logout" {
+			w.logout()
+		}
+	})
+	dialog.Present(w.win)
+}
+
+func (w *window) logout() {
+	if w.client == nil {
+		return
+	}
+	w.client.Logout(w.ctx, func(err error) {
+		if err != nil {
+			w.log.Error().Err(err).Msg("logout")
+			w.toast("Could not log out")
+		}
 	})
 }

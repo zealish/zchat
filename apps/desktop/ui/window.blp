@@ -46,6 +46,12 @@ Adw.ApplicationWindow window {
                     icon-name: "contact-new-symbolic";
                     tooltip-text: "New chat";
                   }
+
+                  [end]
+                  Gtk.Button settings_button {
+                    icon-name: "emblem-system-symbolic";
+                    tooltip-text: "Settings";
+                  }
                 }
               [top]
               Gtk.Box {
@@ -97,6 +103,13 @@ Adw.ApplicationWindow window {
             child: Adw.ToolbarView {
               [top]
               Adw.HeaderBar {
+                [start]
+                Adw.Avatar header_avatar {
+                  size: 32;
+                  show-initials: true;
+                  valign: center;
+                }
+
                 title-widget: Adw.WindowTitle content_title {
                   title: "Conversation";
                 };

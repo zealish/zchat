@@ -303,6 +303,28 @@ func (s *Service) RetryMessage(ctx context.Context, req *zchatv1.RetryMessageReq
 	return &zchatv1.RetryMessageResponse{Message: msg}, nil
 }
 
+// RetryMedia retries a failed outgoing attachment using its stored payload.
+func (s *Service) RetryMedia(ctx context.Context, req *zchatv1.RetryMessageRequest) (*zchatv1.RetryMediaResponse, error) {
+	if req.GetMessageId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "message_id is required")
+	}
+	m, err := s.store.GetMessage(ctx, req.GetMessageId())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, "message not found")
+		}
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if !m.Outgoing || m.Media == nil {
+		return nil, status.Error(codes.InvalidArgument, "message is not a retryable media message")
+	}
+	msg, err := s.session.RetryMedia(ctx, m)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.RetryMediaResponse{Message: msg}, nil
+}
+
 func (s *Service) ReactMessage(ctx context.Context, req *zchatv1.ReactMessageRequest) (*zchatv1.ReactMessageResponse, error) {
 	if req.GetMessageId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "message_id is required")
@@ -322,6 +344,21 @@ func (s *Service) GetChatInfo(ctx context.Context, req *zchatv1.GetChatInfoReque
 		return nil, status.Error(codes.NotFound, "chat not found")
 	}
 	return &zchatv1.GetChatInfoResponse{Chat: wa.ToProtoChat(chat)}, nil
+}
+
+// GetProfilePicture returns the local path of a cached avatar, downloading it
+// on first use. A target without a picture yields an empty path, not an error.
+func (s *Service) GetProfilePicture(ctx context.Context, req *zchatv1.GetProfilePictureRequest) (*zchatv1.GetProfilePictureResponse, error) {
+	jid := req.GetJid()
+	if jid == "" {
+		return nil, status.Error(codes.InvalidArgument, "jid is required")
+	}
+
+	path, err := s.session.ProfilePicture(ctx, jid)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.GetProfilePictureResponse{Jid: jid, Path: path}, nil
 }
 
 // StreamEvents pushes live updates. The current connection state (and any

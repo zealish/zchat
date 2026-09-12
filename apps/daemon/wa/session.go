@@ -49,6 +49,7 @@ type Session struct {
 	startOnce sync.Once
 
 	presence *presenceTracker
+	avatars  *avatarCache
 }
 
 // New builds a session sharing the daemon's SQLite handle with whatsmeow.
@@ -67,6 +68,7 @@ func New(ctx context.Context, db *sql.DB, st *daemonstore.Store, log zerolog.Log
 		state:     &zchatv1.ConnectionState{Status: zchatv1.ConnectionStatus_CONNECTION_STATUS_DISCONNECTED},
 		historyCh: make(chan *events.HistorySync, 8),
 		presence:  newPresenceTracker(),
+		avatars:   newAvatarCache(),
 	}
 	return s, nil
 }
@@ -239,6 +241,8 @@ func (s *Session) handleEvent(evt any) {
 		s.onAppStateChat(ctx, e.JID, nil, nil, &muted)
 	case *events.DeleteForMe:
 		s.onDeleteForMe(ctx, e)
+	case *events.Picture:
+		s.onPictureChanged(ctx, e)
 	case *events.OfflineSyncCompleted:
 		s.log.Info().Int("count", e.Count).Msg("offline sync completed")
 	}
@@ -720,6 +724,46 @@ func (s *Session) RetryText(ctx context.Context, row daemonstore.Message) (*zcha
 		row.Status = daemonstore.StatusFailed
 		s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: toProtoMessage(row)}})
 		return nil, fmt.Errorf("send message: %w", sendErr)
+	}
+	s.finishSend(ctx, &row, jid, resp)
+	out := toProtoMessage(row)
+	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: out}})
+	s.publishChat(ctx, row.ChatJID)
+	return out, nil
+}
+
+// RetryMedia resends an existing failed outgoing attachment using its stored encrypted payload.
+func (s *Session) RetryMedia(ctx context.Context, row daemonstore.Message) (*zchatv1.Message, error) {
+	if !row.Outgoing || row.Media == nil {
+		return nil, errors.New("message is not retryable")
+	}
+	client := s.currentClient()
+	if client == nil {
+		return nil, errors.New("session not started")
+	}
+	jid, err := types.ParseJID(row.ChatJID)
+	if err != nil {
+		return nil, err
+	}
+	raw, _, err := s.store.MediaPayload(ctx, row.ID)
+	if err != nil || len(raw) == 0 {
+		return nil, errors.New("media payload unavailable")
+	}
+	var payload waE2E.Message
+	if err := proto.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	if err := s.store.UpdateMessageStatus(ctx, row.ID, daemonstore.StatusPending); err != nil {
+		return nil, err
+	}
+	row.Status = daemonstore.StatusPending
+	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: toProtoMessage(row)}})
+	resp, sendErr := client.SendMessage(ctx, jid, &payload, whatsmeow.SendRequestExtra{ID: row.ID})
+	if sendErr != nil {
+		_ = s.store.UpdateMessageStatus(ctx, row.ID, daemonstore.StatusFailed)
+		row.Status = daemonstore.StatusFailed
+		s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: toProtoMessage(row)}})
+		return nil, sendErr
 	}
 	s.finishSend(ctx, &row, jid, resp)
 	out := toProtoMessage(row)

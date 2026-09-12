@@ -34,8 +34,10 @@ const (
 	ChatService_SearchChats_FullMethodName        = "/zchat.v1.ChatService/SearchChats"
 	ChatService_SetPresence_FullMethodName        = "/zchat.v1.ChatService/SetPresence"
 	ChatService_RetryMessage_FullMethodName       = "/zchat.v1.ChatService/RetryMessage"
+	ChatService_RetryMedia_FullMethodName         = "/zchat.v1.ChatService/RetryMedia"
 	ChatService_ReactMessage_FullMethodName       = "/zchat.v1.ChatService/ReactMessage"
 	ChatService_GetChatInfo_FullMethodName        = "/zchat.v1.ChatService/GetChatInfo"
+	ChatService_GetProfilePicture_FullMethodName  = "/zchat.v1.ChatService/GetProfilePicture"
 	ChatService_StreamEvents_FullMethodName       = "/zchat.v1.ChatService/StreamEvents"
 )
 
@@ -58,8 +60,10 @@ type ChatServiceClient interface {
 	SearchChats(ctx context.Context, in *SearchChatsRequest, opts ...grpc.CallOption) (*SearchChatsResponse, error)
 	SetPresence(ctx context.Context, in *SetPresenceRequest, opts ...grpc.CallOption) (*SetPresenceResponse, error)
 	RetryMessage(ctx context.Context, in *RetryMessageRequest, opts ...grpc.CallOption) (*RetryMessageResponse, error)
+	RetryMedia(ctx context.Context, in *RetryMessageRequest, opts ...grpc.CallOption) (*RetryMediaResponse, error)
 	ReactMessage(ctx context.Context, in *ReactMessageRequest, opts ...grpc.CallOption) (*ReactMessageResponse, error)
 	GetChatInfo(ctx context.Context, in *GetChatInfoRequest, opts ...grpc.CallOption) (*GetChatInfoResponse, error)
+	GetProfilePicture(ctx context.Context, in *GetProfilePictureRequest, opts ...grpc.CallOption) (*GetProfilePictureResponse, error)
 	StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
 }
 
@@ -221,6 +225,16 @@ func (c *chatServiceClient) RetryMessage(ctx context.Context, in *RetryMessageRe
 	return out, nil
 }
 
+func (c *chatServiceClient) RetryMedia(ctx context.Context, in *RetryMessageRequest, opts ...grpc.CallOption) (*RetryMediaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RetryMediaResponse)
+	err := c.cc.Invoke(ctx, ChatService_RetryMedia_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatServiceClient) ReactMessage(ctx context.Context, in *ReactMessageRequest, opts ...grpc.CallOption) (*ReactMessageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReactMessageResponse)
@@ -235,6 +249,16 @@ func (c *chatServiceClient) GetChatInfo(ctx context.Context, in *GetChatInfoRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetChatInfoResponse)
 	err := c.cc.Invoke(ctx, ChatService_GetChatInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) GetProfilePicture(ctx context.Context, in *GetProfilePictureRequest, opts ...grpc.CallOption) (*GetProfilePictureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProfilePictureResponse)
+	err := c.cc.Invoke(ctx, ChatService_GetProfilePicture_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -279,8 +303,10 @@ type ChatServiceServer interface {
 	SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error)
 	SetPresence(context.Context, *SetPresenceRequest) (*SetPresenceResponse, error)
 	RetryMessage(context.Context, *RetryMessageRequest) (*RetryMessageResponse, error)
+	RetryMedia(context.Context, *RetryMessageRequest) (*RetryMediaResponse, error)
 	ReactMessage(context.Context, *ReactMessageRequest) (*ReactMessageResponse, error)
 	GetChatInfo(context.Context, *GetChatInfoRequest) (*GetChatInfoResponse, error)
+	GetProfilePicture(context.Context, *GetProfilePictureRequest) (*GetProfilePictureResponse, error)
 	StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error
 	mustEmbedUnimplementedChatServiceServer()
 }
@@ -337,11 +363,17 @@ func (UnimplementedChatServiceServer) SetPresence(context.Context, *SetPresenceR
 func (UnimplementedChatServiceServer) RetryMessage(context.Context, *RetryMessageRequest) (*RetryMessageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RetryMessage not implemented")
 }
+func (UnimplementedChatServiceServer) RetryMedia(context.Context, *RetryMessageRequest) (*RetryMediaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RetryMedia not implemented")
+}
 func (UnimplementedChatServiceServer) ReactMessage(context.Context, *ReactMessageRequest) (*ReactMessageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReactMessage not implemented")
 }
 func (UnimplementedChatServiceServer) GetChatInfo(context.Context, *GetChatInfoRequest) (*GetChatInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetChatInfo not implemented")
+}
+func (UnimplementedChatServiceServer) GetProfilePicture(context.Context, *GetProfilePictureRequest) (*GetProfilePictureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProfilePicture not implemented")
 }
 func (UnimplementedChatServiceServer) StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error {
 	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
@@ -637,6 +669,24 @@ func _ChatService_RetryMessage_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatService_RetryMedia_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetryMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).RetryMedia(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_RetryMedia_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).RetryMedia(ctx, req.(*RetryMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatService_ReactMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReactMessageRequest)
 	if err := dec(in); err != nil {
@@ -669,6 +719,24 @@ func _ChatService_GetChatInfo_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ChatServiceServer).GetChatInfo(ctx, req.(*GetChatInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_GetProfilePicture_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProfilePictureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).GetProfilePicture(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_GetProfilePicture_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).GetProfilePicture(ctx, req.(*GetProfilePictureRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -752,12 +820,20 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ChatService_RetryMessage_Handler,
 		},
 		{
+			MethodName: "RetryMedia",
+			Handler:    _ChatService_RetryMedia_Handler,
+		},
+		{
 			MethodName: "ReactMessage",
 			Handler:    _ChatService_ReactMessage_Handler,
 		},
 		{
 			MethodName: "GetChatInfo",
 			Handler:    _ChatService_GetChatInfo_Handler,
+		},
+		{
+			MethodName: "GetProfilePicture",
+			Handler:    _ChatService_GetProfilePicture_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
