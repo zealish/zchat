@@ -15,7 +15,7 @@
 %global _binary_payload w3.zstdio
 
 Name:           zchat
-Version:        %{?_zchat_version}%{!?_zchat_version:0.7.0}
+Version:        %{?_zchat_version}%{!?_zchat_version:0.7.1}
 Release:        1%{?dist}
 Summary:        Native Linux desktop client for WhatsApp Multi-Device
 
@@ -80,6 +80,11 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Sat Sep 12 2026 Zealish <dev@zealish.com> - 0.7.1-1
+- Open a chat on a single click instead of requiring a second one
+- Keep the chat list's scroll position when a chat is opened
+- Decode images and stickers off the UI thread
+
 * Sat Sep 12 2026 Zealish <dev@zealish.com> - 0.7.0-1
 - Gate the UI on a progress screen until the first full sync completes
 - Merge duplicate LID chats and backfill chat names after syncing

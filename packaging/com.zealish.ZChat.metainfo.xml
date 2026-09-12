@@ -31,6 +31,11 @@
   </content_rating>
 
   <releases>
+    <release version="0.7.1" date="2026-09-12">
+      <description>
+        <p>Chats open on a single click, the chat list no longer jumps back to the top when one is opened, and media decoding no longer freezes the window.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-09-12">
       <description>
         <p>A sync progress screen that gates the UI until the first full history sync finishes, plus duplicate chat merging.</p>
