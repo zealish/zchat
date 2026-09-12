@@ -72,7 +72,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 
 %files
 %license LICENSE
-%doc PRD.md
+%doc README.md
 %{_bindir}/%{name}
 %{_bindir}/%{name}-daemon
 %{_datadir}/applications/%{appid}.desktop

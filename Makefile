@@ -6,6 +6,7 @@ DIST_DIR := dist
 APP_ID := com.zealish.ZChat
 VERSION ?= 0.5.0
 GO_LDFLAGS ?=
+FLATPAK_BUILDER ?= flatpak-builder
 GO_BUILD_FLAGS := $(if $(GO_LDFLAGS),-ldflags '$(GO_LDFLAGS)',)
 
 PROTOC_GEN_GO_VERSION := v1.36.12
@@ -72,7 +73,7 @@ rpm: dist-tarball
 # copied to a stable name the flatpak source can point at.
 flatpak: dist-tarball
 	cp $(DIST_DIR)/zchat-$(VERSION).tar.gz $(DIST_DIR)/zchat-src.tar.gz
-	flatpak-builder --force-clean --repo=$(DIST_DIR)/flatpak-repo \
+	$(FLATPAK_BUILDER) --force-clean --repo=$(DIST_DIR)/flatpak-repo \
 		$(DIST_DIR)/flatpak-build packaging/flatpak/$(APP_ID).yaml
 	flatpak build-bundle $(DIST_DIR)/flatpak-repo \
 		$(DIST_DIR)/zchat-$(VERSION).flatpak $(APP_ID)
