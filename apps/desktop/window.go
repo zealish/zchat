@@ -30,6 +30,10 @@ var (
 	messageModelType = gioutil.NewListModelType[*zchatv1.Message]()
 )
 
+// bubbleMaxWidth caps a message bubble's width in pixels, mirroring the
+// readable column WhatsApp Web keeps its bubbles within.
+const bubbleMaxWidth = 560
+
 type window struct {
 	ctx  context.Context
 	log  zerolog.Logger
@@ -918,11 +922,19 @@ func (w *window) setupMessageList() {
 		outer.SetMarginEnd(12)
 		outer.SetHExpand(true)
 
+		// The clamp caps how wide a bubble may grow, the way WhatsApp Web
+		// does. Without it any child with a large natural width — an
+		// ellipsized quote preview is the usual culprit — stretches the
+		// bubble across the entire row.
+		clamp := adw.NewClamp()
+		clamp.SetMaximumSize(bubbleMaxWidth)
+		clamp.SetTighteningThreshold(bubbleMaxWidth)
+		// hexpand gives the clamp the full row allocation so halign can pin
+		// the bubble to the left (incoming) or right (outgoing) edge.
+		clamp.SetHExpand(true)
+
 		bubble := gtk.NewBox(gtk.OrientationVertical, 2)
 		bubble.AddCSSClass("zchat-bubble")
-		// hexpand gives the bubble the full row allocation so halign can pin
-		// it to the left (incoming) or right (outgoing) edge.
-		bubble.SetHExpand(true)
 
 		sender := gtk.NewLabel("")
 		sender.SetXAlign(0)
@@ -950,6 +962,9 @@ func (w *window) setupMessageList() {
 		quotedBody.SetXAlign(0)
 		quotedBody.SetSingleLineMode(true)
 		quotedBody.SetEllipsize(pango.EllipsizeEnd)
+		// A single-line ellipsized label reports the untruncated string as its
+		// natural width, so it is capped here rather than left to the clamp.
+		quotedBody.SetMaxWidthChars(36)
 		quotedBody.AddCSSClass("dim-label")
 		quoted.Append(quotedBody)
 
@@ -967,20 +982,30 @@ func (w *window) setupMessageList() {
 		media.Append(action)
 		bubble.Append(media)
 
+		// WhatsApp tucks the timestamp into the body's last line when it
+		// fits. An overlay pins it to the bottom-right corner and
+		// bindMessageRow pads the body text so the two never collide.
+		bodyOverlay := gtk.NewOverlay()
 		body := gtk.NewLabel("")
 		body.SetXAlign(0)
 		body.SetWrap(true)
 		body.SetWrapMode(pango.WrapWordChar)
 		body.SetNaturalWrapMode(gtk.NaturalWrapWord)
-		body.SetMaxWidthChars(48)
 		body.SetSelectable(true)
 		body.AddCSSClass("zchat-message")
-		bubble.Append(body)
+		bodyOverlay.SetChild(body)
 
 		meta := gtk.NewLabel("")
 		meta.SetXAlign(1)
+		meta.SetHAlign(gtk.AlignEnd)
+		meta.SetVAlign(gtk.AlignEnd)
+		// The overlay sits on top of selectable text; without this it would
+		// swallow clicks meant for the body.
+		meta.SetCanTarget(false)
 		meta.AddCSSClass("zchat-timestamp")
-		bubble.Append(meta)
+		bodyOverlay.AddOverlay(meta)
+		bubble.Append(bodyOverlay)
+
 		reaction := gtk.NewLabel("")
 		reaction.SetXAlign(1)
 		reaction.AddCSSClass("zchat-reaction")
@@ -992,7 +1017,8 @@ func (w *window) setupMessageList() {
 			}
 			showMenu(bubble, x, y, w.messageMenuEntries(msg, bubble, x, y))
 		})
-		outer.Append(bubble)
+		clamp.SetChild(bubble)
+		outer.Append(clamp)
 		item.SetChild(outer)
 	})
 	factory.ConnectBind(func(obj *coreglib.Object) {
@@ -1013,10 +1039,21 @@ func (w *window) setupMessageList() {
 	w.messageList.SetFactory(&factory.ListItemFactory)
 }
 
+// clampOf returns the width-limiting clamp of a message row: the row is an
+// outer box wrapping a clamp, which in turn holds the bubble.
+func clampOf(item *gtk.ListItem) *adw.Clamp {
+	return item.Child().(*gtk.Box).FirstChild().(*adw.Clamp)
+}
+
+// bubbleOf returns a message row's bubble.
+func bubbleOf(item *gtk.ListItem) *gtk.Box {
+	return clampOf(item).FirstChild().(*gtk.Box)
+}
+
 // mediaBoxOf returns a message row's attachment container, the fourth child of
 // its bubble.
 func mediaBoxOf(item *gtk.ListItem) *gtk.Box {
-	bubble := item.Child().(*gtk.Box).FirstChild().(*gtk.Box)
+	bubble := bubbleOf(item)
 	sender := bubble.FirstChild().(*gtk.Label)
 	forwarded := sender.NextSibling().(*gtk.Label)
 	return forwarded.NextSibling().(*gtk.Box).NextSibling().(*gtk.Box)
@@ -1027,24 +1064,22 @@ func mediaPreviewOf(item *gtk.ListItem) *gtk.Picture {
 }
 
 func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
-	outer := item.Child().(*gtk.Box)
-	bubble := outer.FirstChild().(*gtk.Box)
+	clamp := clampOf(item)
+	bubble := clamp.FirstChild().(*gtk.Box)
 	sender := bubble.FirstChild().(*gtk.Label)
 	forwarded := sender.NextSibling().(*gtk.Label)
 	quoted := forwarded.NextSibling().(*gtk.Box)
 	media := mediaBoxOf(item)
-	body := media.NextSibling().(*gtk.Label)
+	bodyOverlay := media.NextSibling().(*gtk.Overlay)
+	body := bodyOverlay.Child().(*gtk.Label)
 	meta := body.NextSibling().(*gtk.Label)
-	reaction := meta.NextSibling().(*gtk.Label)
+	reaction := bodyOverlay.NextSibling().(*gtk.Label)
 	reaction.SetText(msg.GetReaction())
 	reaction.SetVisible(msg.GetReaction() != "")
 	// Rows are recycled, so the find highlight is reapplied on every bind.
 	highlightRow(item, w.findCurrent != "" && msg.GetId() == w.findCurrent)
 
 	w.bindMedia(media, msg)
-
-	body.SetText(msg.GetBody())
-	body.SetVisible(msg.GetBody() != "")
 
 	forwarded.SetVisible(msg.GetForwarded())
 
@@ -1057,12 +1092,16 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 		quoted.SetVisible(false)
 	}
 
+	// The clamp carries the alignment because it, not the bubble, is the
+	// child that expands to fill the row.
 	if msg.GetOutgoing() {
+		clamp.SetHAlign(gtk.AlignEnd)
 		bubble.SetHAlign(gtk.AlignEnd)
 		bubble.RemoveCSSClass("zchat-bubble-in")
 		bubble.AddCSSClass("zchat-bubble-out")
 		sender.SetVisible(false)
 	} else {
+		clamp.SetHAlign(gtk.AlignStart)
 		bubble.SetHAlign(gtk.AlignStart)
 		bubble.RemoveCSSClass("zchat-bubble-out")
 		bubble.AddCSSClass("zchat-bubble-in")
@@ -1086,6 +1125,48 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 	} else {
 		meta.SetText(stamp)
 	}
+
+	// The body is padded only once the timestamp's final width is known, so
+	// this has to follow meta.SetText above.
+	setBodyText(body, meta, msg.GetBody())
+}
+
+// setBodyText fills a bubble's body and reserves room on its last line for the
+// timestamp overlaid in the bottom-right corner, the way WhatsApp Web does.
+//
+// A media-only message has no body to pad. Only the body label is hidden then,
+// never the overlay, so the timestamp still renders under the attachment.
+func setBodyText(body, meta *gtk.Label, text string) {
+	body.SetVisible(text != "")
+	if text == "" {
+		return
+	}
+	body.SetText(text + timestampSpacer(body, meta))
+}
+
+// timestampSpacer returns non-breaking spaces wide enough to clear the
+// timestamp. Pango measures both labels in their own font, so the reservation
+// tracks the theme's font size rather than assuming a fixed width.
+func timestampSpacer(body, meta *gtk.Label) string {
+	// spacerSample is averaged over several spaces to smooth off the
+	// sub-pixel advance width of a single one.
+	const spacerSample = 20
+	needed, _ := meta.CreatePangoLayout(meta.Text()).PixelSize()
+	sampled, _ := body.CreatePangoLayout(strings.Repeat("\u00a0", spacerSample)).PixelSize()
+	return spacerRun(needed, sampled, spacerSample)
+}
+
+// spacerRun sizes the run of non-breaking spaces that reserves needed pixels,
+// given the measured width of sample spaces.
+func spacerRun(needed, sampled, sample int) string {
+	if sampled <= 0 || sample <= 0 || needed <= 0 {
+		return ""
+	}
+	const gap = 8 // breathing room between the text and the timestamp
+	count := (needed+gap)*sample/sampled + 1
+	// A zero-width space gives Pango a break opportunity, so an overlong
+	// spacer wraps on its own instead of dragging the last word down with it.
+	return "\u200b" + strings.Repeat("\u00a0", count)
 }
 
 // bindMedia renders a message's attachment: the WhatsApp thumbnail (or the

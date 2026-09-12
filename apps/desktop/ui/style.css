@@ -1,36 +1,52 @@
 @define-color accent_bg_color #25D366;
 @define-color accent_color #128C7E;
 
+/* WhatsApp Web bubble palette. Libadwaita's @card_bg_color and @window_bg_color
+ * already flip between the light and dark scheme, so mixing against them keeps
+ * one rule adaptive: GTK4 CSS has no prefers-color-scheme media query. */
+@define-color zchat_bubble_in_bg mix(@card_bg_color, @window_bg_color, 0.25);
+@define-color zchat_bubble_out_bg mix(@card_bg_color, @accent_bg_color, 0.28);
+
 .zchat-message {
-  font-family: Inter, sans-serif;
+  font-size: 0.95em;
 }
 
 .zchat-bubble {
-  border-radius: 12px;
-  padding: 8px 12px;
+  border-radius: 8px;
+  padding: 6px 9px 6px 9px;
+  box-shadow: 0 1px 1px alpha(black, 0.13);
 }
 
 .zchat-bubble-in {
-  background-color: alpha(currentColor, 0.08);
+  background-color: @zchat_bubble_in_bg;
+  /* WhatsApp squares off the corner that points at the sender. */
+  border-top-left-radius: 2px;
 }
 
 .zchat-bubble-out {
-  background-color: alpha(@accent_bg_color, 0.22);
+  background-color: @zchat_bubble_out_bg;
+  border-top-right-radius: 2px;
 }
 
 .zchat-messages {
   background: none;
 }
 
+/* Overlaid onto the body's last line, which setBodyText pads to make room. */
 .zchat-timestamp {
-  font-size: 0.8em;
-  opacity: 0.6;
+  font-size: 0.72em;
+  opacity: 0.55;
+}
+
+.zchat-reaction {
+  font-size: 0.9em;
 }
 
 .zchat-sender {
-  font-size: 0.85em;
+  font-size: 0.82em;
   font-weight: bold;
   color: @accent_color;
+  margin-bottom: 1px;
 }
 
 .zchat-unread {
@@ -42,11 +58,11 @@
 }
 
 .zchat-media {
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .zchat-reply-bar {
-  border-left: 3px solid @accent_bg_color;
+  border-left: 4px solid @accent_bg_color;
   border-radius: 6px;
   background-color: alpha(currentColor, 0.06);
   padding: 4px 8px;
@@ -58,11 +74,14 @@
   padding: 6px 8px;
 }
 
+/* Quoted preview: WhatsApp tints it darker than the bubble it sits in and
+ * marks it with a full-height accent bar. */
 .zchat-quoted {
-  border-left: 3px solid @accent_color;
-  border-radius: 6px;
-  background-color: alpha(currentColor, 0.07);
+  border-left: 4px solid @accent_color;
+  border-radius: 4px;
+  background-color: alpha(black, 0.16);
   padding: 4px 8px;
+  margin-bottom: 3px;
 }
 
 .zchat-forwarded {

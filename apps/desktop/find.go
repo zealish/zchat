@@ -135,7 +135,7 @@ func (w *window) setFindCurrent(id string) {
 }
 
 func highlightRow(item *gtk.ListItem, on bool) {
-	bubble := item.Child().(*gtk.Box).FirstChild().(*gtk.Box)
+	bubble := bubbleOf(item)
 	if on {
 		bubble.AddCSSClass("zchat-found")
 		return
