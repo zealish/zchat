@@ -92,14 +92,46 @@ func (c *Client) GetChats(ctx context.Context, archived bool, onDone func(bool, 
 	}()
 }
 
-// GetMessages loads a chat's messages off the main loop.
-func (c *Client) GetMessages(ctx context.Context, chatJID string, onDone func(string, []*zchatv1.Message, error)) {
+// GetContacts loads synced contacts off the main loop.
+func (c *Client) GetContacts(ctx context.Context, onDone func([]*zchatv1.Contact, error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		resp, err := c.svc.GetContacts(callCtx, &zchatv1.GetContactsRequest{})
+		var contacts []*zchatv1.Contact
+		if resp != nil {
+			contacts = resp.GetContacts()
+		}
+		idle(func() { onDone(contacts, err) })
+	}()
+}
+
+// StartChat creates or opens a direct conversation without sending a message.
+func (c *Client) StartChat(ctx context.Context, recipient string, onDone func(*zchatv1.Chat, error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		resp, err := c.svc.StartChat(callCtx, &zchatv1.StartChatRequest{Recipient: recipient})
+		var chat *zchatv1.Chat
+		if resp != nil {
+			chat = resp.GetChat()
+		}
+		idle(func() { onDone(chat, err) })
+	}()
+}
+
+// GetMessages loads a page of chat messages off the main loop.
+func (c *Client) GetMessages(ctx context.Context, chatJID string, before int64, onDone func(string, []*zchatv1.Message, error)) {
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 		defer cancel()
 
-		resp, err := c.svc.GetMessages(callCtx, &zchatv1.GetMessagesRequest{ChatJid: chatJID})
-		idle(func() { onDone(chatJID, resp.GetMessages(), err) })
+		resp, err := c.svc.GetMessages(callCtx, &zchatv1.GetMessagesRequest{ChatJid: chatJID, BeforeTimestamp: before})
+		var messages []*zchatv1.Message
+		if resp != nil {
+			messages = resp.GetMessages()
+		}
+		idle(func() { onDone(chatJID, messages, err) })
 	}()
 }
 
@@ -153,11 +185,16 @@ func (c *Client) DeleteMessage(ctx context.Context, messageID string, revoke boo
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 		defer cancel()
+		_, err := c.svc.DeleteMessage(callCtx, &zchatv1.DeleteMessageRequest{MessageId: messageID, Revoke: revoke})
+		idle(func() { onDone(err) })
+	}()
+}
 
-		_, err := c.svc.DeleteMessage(callCtx, &zchatv1.DeleteMessageRequest{
-			MessageId: messageID,
-			Revoke:    revoke,
-		})
+func (c *Client) ReactMessage(ctx context.Context, messageID, emoji string, onDone func(error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		_, err := c.svc.ReactMessage(callCtx, &zchatv1.ReactMessageRequest{MessageId: messageID, Emoji: emoji})
 		idle(func() { onDone(err) })
 	}()
 }
@@ -211,6 +248,15 @@ func (c *Client) SetPresence(ctx context.Context, chatJID string, typing, availa
 			Typing:    typing,
 			Available: available,
 		})
+	}()
+}
+
+func (c *Client) GetChatInfo(ctx context.Context, chatJID string, onDone func(*zchatv1.GetChatInfoResponse, error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		resp, err := c.svc.GetChatInfo(callCtx, &zchatv1.GetChatInfoRequest{ChatJid: chatJID})
+		idle(func() { onDone(resp, err) })
 	}()
 }
 

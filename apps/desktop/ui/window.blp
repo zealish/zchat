@@ -40,8 +40,13 @@ Adw.ApplicationWindow window {
 
             child: Adw.ToolbarView {
               [top]
-              Adw.HeaderBar {}
-
+                Adw.HeaderBar {
+                  [end]
+                  Gtk.Button new_chat_button {
+                    icon-name: "contact-new-symbolic";
+                    tooltip-text: "New chat";
+                  }
+                }
               [top]
               Gtk.Box {
                 orientation: vertical;
@@ -95,6 +100,11 @@ Adw.ApplicationWindow window {
                 title-widget: Adw.WindowTitle content_title {
                   title: "Conversation";
                 };
+                [end]
+                Gtk.Button chat_info_button {
+                  icon-name: "dialog-information-symbolic";
+                  tooltip-text: "Chat information";
+                }
               }
 
               content: Gtk.ScrolledWindow message_scroll {

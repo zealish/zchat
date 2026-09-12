@@ -223,6 +223,40 @@ func (s *Session) ForwardMessage(ctx context.Context, messageID, toChatJID strin
 	return out, nil
 }
 
+// ReactMessage sends or removes a reaction on an existing message.
+func (s *Session) ReactMessage(ctx context.Context, messageID, emoji string) (*zchatv1.Message, error) {
+	row, err := s.store.GetMessage(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+	client := s.currentClient()
+	if client == nil {
+		return nil, errors.New("session not started")
+	}
+	chat, err := types.ParseJID(row.ChatJID)
+	if err != nil {
+		return nil, err
+	}
+	sender, err := types.ParseJID(row.Sender)
+	if err != nil {
+		return nil, fmt.Errorf("invalid original sender %q: %w", row.Sender, err)
+	}
+	if sender.IsEmpty() {
+		return nil, fmt.Errorf("invalid original sender %q", row.Sender)
+	}
+	payload := client.BuildReaction(chat, sender, types.MessageID(row.ID), emoji)
+	if _, err := client.SendMessage(ctx, chat, payload); err != nil {
+		return nil, err
+	}
+	if err := s.store.SetMessageReaction(ctx, messageID, emoji); err != nil {
+		return nil, err
+	}
+	row.Reaction = emoji
+	out := toProtoMessage(row)
+	s.pub.Publish(&zchatv1.Event{Payload: &zchatv1.Event_MessageUpdated{MessageUpdated: out}})
+	return out, nil
+}
+
 // forwardPayload rebuilds the outgoing message for a forward, marking it as
 // forwarded so the recipient sees the usual label.
 func forwardPayload(ctx context.Context, st *daemonstore.Store, source daemonstore.Message) (*waE2E.Message, error) {

@@ -15,7 +15,7 @@ func (w *window) setupShortcuts() {
 		run    func()
 	}{
 		{"search", []string{"<Control>k", "<Control>f"}, w.focusSearch},
-		{"new-chat", []string{"<Control>n"}, w.focusSearch},
+		{"new-chat", []string{"<Control>n"}, w.showNewChatDialog},
 		{"focus-chats", []string{"<Control>l"}, w.focusChatList},
 		{"mute-chat", []string{"<Control><Shift>m"}, w.toggleMuteActiveChat},
 		{"close", []string{"<Control>w"}, func() { w.win.Close() }},

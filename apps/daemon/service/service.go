@@ -57,6 +57,22 @@ func (s *Service) GetChats(ctx context.Context, req *zchatv1.GetChatsRequest) (*
 	return resp, nil
 }
 
+func (s *Service) GetContacts(ctx context.Context, _ *zchatv1.GetContactsRequest) (*zchatv1.GetContactsResponse, error) {
+	contacts, err := s.session.GetContacts(ctx)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &zchatv1.GetContactsResponse{Contacts: contacts}, nil
+}
+
+func (s *Service) StartChat(ctx context.Context, req *zchatv1.StartChatRequest) (*zchatv1.StartChatResponse, error) {
+	chat, err := s.session.StartChat(ctx, req.GetRecipient())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	return &zchatv1.StartChatResponse{Chat: chat}, nil
+}
+
 // SearchChats returns chats matching a free-text query.
 func (s *Service) SearchChats(ctx context.Context, req *zchatv1.SearchChatsRequest) (*zchatv1.SearchChatsResponse, error) {
 	query := strings.TrimSpace(req.GetQuery())
@@ -285,6 +301,27 @@ func (s *Service) RetryMessage(ctx context.Context, req *zchatv1.RetryMessageReq
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	return &zchatv1.RetryMessageResponse{Message: msg}, nil
+}
+
+func (s *Service) ReactMessage(ctx context.Context, req *zchatv1.ReactMessageRequest) (*zchatv1.ReactMessageResponse, error) {
+	if req.GetMessageId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "message_id is required")
+	}
+	msg, err := s.session.ReactMessage(ctx, req.GetMessageId(), req.GetEmoji())
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	return &zchatv1.ReactMessageResponse{Message: msg}, nil
+}
+func (s *Service) GetChatInfo(ctx context.Context, req *zchatv1.GetChatInfoRequest) (*zchatv1.GetChatInfoResponse, error) {
+	if req.GetChatJid() == "" {
+		return nil, status.Error(codes.InvalidArgument, "chat_jid is required")
+	}
+	chat, err := s.store.GetChat(ctx, req.GetChatJid())
+	if err != nil {
+		return nil, status.Error(codes.NotFound, "chat not found")
+	}
+	return &zchatv1.GetChatInfoResponse{Chat: wa.ToProtoChat(chat)}, nil
 }
 
 // StreamEvents pushes live updates. The current connection state (and any

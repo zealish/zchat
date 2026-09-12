@@ -6,6 +6,8 @@ option go_package = "github.com/zealish/zchat/packages/ipc/zchatv1;zchatv1";
 
 service ChatService {
   rpc GetChats(GetChatsRequest) returns (GetChatsResponse);
+  rpc GetContacts(GetContactsRequest) returns (GetContactsResponse);
+  rpc StartChat(StartChatRequest) returns (StartChatResponse);
   rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc SendMedia(SendMediaRequest) returns (SendMediaResponse);
@@ -18,6 +20,8 @@ service ChatService {
   rpc SearchChats(SearchChatsRequest) returns (SearchChatsResponse);
   rpc SetPresence(SetPresenceRequest) returns (SetPresenceResponse);
   rpc RetryMessage(RetryMessageRequest) returns (RetryMessageResponse);
+  rpc ReactMessage(ReactMessageRequest) returns (ReactMessageResponse);
+  rpc GetChatInfo(GetChatInfoRequest) returns (GetChatInfoResponse);
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
 }
 
@@ -55,6 +59,14 @@ message Message {
   MediaInfo media = 10; // set when type != "text"
   QuotedMessage quoted = 11; // set when this message replies to another
   bool forwarded = 12;
+  string reaction = 13; // legacy current-user reaction
+  repeated MessageReaction reactions = 14;
+}
+
+message MessageReaction {
+  string sender = 1;
+  string sender_name = 2;
+  string emoji = 3;
 }
 
 // QuotedMessage is the snapshot of the message a reply points at. The original
@@ -105,6 +117,17 @@ message GetChatsRequest {
 message GetChatsResponse {
   repeated Chat chats = 1;
 }
+
+message Contact {
+  string jid = 1;
+  string name = 2;
+  string phone_number = 3;
+}
+
+message GetContactsRequest {}
+message GetContactsResponse { repeated Contact contacts = 1; }
+message StartChatRequest { string recipient = 1; }
+message StartChatResponse { Chat chat = 1; }
 
 message GetMessagesRequest {
   string chat_jid = 1;
@@ -237,6 +260,11 @@ message RetryMessageResponse {
 }
 
 message SetPresenceResponse {}
+message ReactMessageRequest { string message_id = 1; string emoji = 2; }
+message ReactMessageResponse { Message message = 1; }
+
+message GetChatInfoRequest { string chat_jid = 1; }
+message GetChatInfoResponse { Chat chat = 1; repeated Contact members = 2; }
 
 message Event {
   oneof payload {

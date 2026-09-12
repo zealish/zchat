@@ -20,6 +20,8 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ChatService_GetChats_FullMethodName           = "/zchat.v1.ChatService/GetChats"
+	ChatService_GetContacts_FullMethodName        = "/zchat.v1.ChatService/GetContacts"
+	ChatService_StartChat_FullMethodName          = "/zchat.v1.ChatService/StartChat"
 	ChatService_GetMessages_FullMethodName        = "/zchat.v1.ChatService/GetMessages"
 	ChatService_SendMessage_FullMethodName        = "/zchat.v1.ChatService/SendMessage"
 	ChatService_SendMedia_FullMethodName          = "/zchat.v1.ChatService/SendMedia"
@@ -32,6 +34,8 @@ const (
 	ChatService_SearchChats_FullMethodName        = "/zchat.v1.ChatService/SearchChats"
 	ChatService_SetPresence_FullMethodName        = "/zchat.v1.ChatService/SetPresence"
 	ChatService_RetryMessage_FullMethodName       = "/zchat.v1.ChatService/RetryMessage"
+	ChatService_ReactMessage_FullMethodName       = "/zchat.v1.ChatService/ReactMessage"
+	ChatService_GetChatInfo_FullMethodName        = "/zchat.v1.ChatService/GetChatInfo"
 	ChatService_StreamEvents_FullMethodName       = "/zchat.v1.ChatService/StreamEvents"
 )
 
@@ -40,6 +44,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatServiceClient interface {
 	GetChats(ctx context.Context, in *GetChatsRequest, opts ...grpc.CallOption) (*GetChatsResponse, error)
+	GetContacts(ctx context.Context, in *GetContactsRequest, opts ...grpc.CallOption) (*GetContactsResponse, error)
+	StartChat(ctx context.Context, in *StartChatRequest, opts ...grpc.CallOption) (*StartChatResponse, error)
 	GetMessages(ctx context.Context, in *GetMessagesRequest, opts ...grpc.CallOption) (*GetMessagesResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	SendMedia(ctx context.Context, in *SendMediaRequest, opts ...grpc.CallOption) (*SendMediaResponse, error)
@@ -52,6 +58,8 @@ type ChatServiceClient interface {
 	SearchChats(ctx context.Context, in *SearchChatsRequest, opts ...grpc.CallOption) (*SearchChatsResponse, error)
 	SetPresence(ctx context.Context, in *SetPresenceRequest, opts ...grpc.CallOption) (*SetPresenceResponse, error)
 	RetryMessage(ctx context.Context, in *RetryMessageRequest, opts ...grpc.CallOption) (*RetryMessageResponse, error)
+	ReactMessage(ctx context.Context, in *ReactMessageRequest, opts ...grpc.CallOption) (*ReactMessageResponse, error)
+	GetChatInfo(ctx context.Context, in *GetChatInfoRequest, opts ...grpc.CallOption) (*GetChatInfoResponse, error)
 	StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
 }
 
@@ -67,6 +75,26 @@ func (c *chatServiceClient) GetChats(ctx context.Context, in *GetChatsRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetChatsResponse)
 	err := c.cc.Invoke(ctx, ChatService_GetChats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) GetContacts(ctx context.Context, in *GetContactsRequest, opts ...grpc.CallOption) (*GetContactsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetContactsResponse)
+	err := c.cc.Invoke(ctx, ChatService_GetContacts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) StartChat(ctx context.Context, in *StartChatRequest, opts ...grpc.CallOption) (*StartChatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartChatResponse)
+	err := c.cc.Invoke(ctx, ChatService_StartChat_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +221,26 @@ func (c *chatServiceClient) RetryMessage(ctx context.Context, in *RetryMessageRe
 	return out, nil
 }
 
+func (c *chatServiceClient) ReactMessage(ctx context.Context, in *ReactMessageRequest, opts ...grpc.CallOption) (*ReactMessageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReactMessageResponse)
+	err := c.cc.Invoke(ctx, ChatService_ReactMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatServiceClient) GetChatInfo(ctx context.Context, in *GetChatInfoRequest, opts ...grpc.CallOption) (*GetChatInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetChatInfoResponse)
+	err := c.cc.Invoke(ctx, ChatService_GetChatInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatServiceClient) StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], ChatService_StreamEvents_FullMethodName, cOpts...)
@@ -217,6 +265,8 @@ type ChatService_StreamEventsClient = grpc.ServerStreamingClient[Event]
 // for forward compatibility.
 type ChatServiceServer interface {
 	GetChats(context.Context, *GetChatsRequest) (*GetChatsResponse, error)
+	GetContacts(context.Context, *GetContactsRequest) (*GetContactsResponse, error)
+	StartChat(context.Context, *StartChatRequest) (*StartChatResponse, error)
 	GetMessages(context.Context, *GetMessagesRequest) (*GetMessagesResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	SendMedia(context.Context, *SendMediaRequest) (*SendMediaResponse, error)
@@ -229,6 +279,8 @@ type ChatServiceServer interface {
 	SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error)
 	SetPresence(context.Context, *SetPresenceRequest) (*SetPresenceResponse, error)
 	RetryMessage(context.Context, *RetryMessageRequest) (*RetryMessageResponse, error)
+	ReactMessage(context.Context, *ReactMessageRequest) (*ReactMessageResponse, error)
+	GetChatInfo(context.Context, *GetChatInfoRequest) (*GetChatInfoResponse, error)
 	StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error
 	mustEmbedUnimplementedChatServiceServer()
 }
@@ -242,6 +294,12 @@ type UnimplementedChatServiceServer struct{}
 
 func (UnimplementedChatServiceServer) GetChats(context.Context, *GetChatsRequest) (*GetChatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetChats not implemented")
+}
+func (UnimplementedChatServiceServer) GetContacts(context.Context, *GetContactsRequest) (*GetContactsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetContacts not implemented")
+}
+func (UnimplementedChatServiceServer) StartChat(context.Context, *StartChatRequest) (*StartChatResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartChat not implemented")
 }
 func (UnimplementedChatServiceServer) GetMessages(context.Context, *GetMessagesRequest) (*GetMessagesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMessages not implemented")
@@ -278,6 +336,12 @@ func (UnimplementedChatServiceServer) SetPresence(context.Context, *SetPresenceR
 }
 func (UnimplementedChatServiceServer) RetryMessage(context.Context, *RetryMessageRequest) (*RetryMessageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RetryMessage not implemented")
+}
+func (UnimplementedChatServiceServer) ReactMessage(context.Context, *ReactMessageRequest) (*ReactMessageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReactMessage not implemented")
+}
+func (UnimplementedChatServiceServer) GetChatInfo(context.Context, *GetChatInfoRequest) (*GetChatInfoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetChatInfo not implemented")
 }
 func (UnimplementedChatServiceServer) StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[Event]) error {
 	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
@@ -317,6 +381,42 @@ func _ChatService_GetChats_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ChatServiceServer).GetChats(ctx, req.(*GetChatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_GetContacts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetContactsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).GetContacts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_GetContacts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).GetContacts(ctx, req.(*GetContactsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_StartChat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartChatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).StartChat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_StartChat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).StartChat(ctx, req.(*StartChatRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -537,6 +637,42 @@ func _ChatService_RetryMessage_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatService_ReactMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReactMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).ReactMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_ReactMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).ReactMessage(ctx, req.(*ReactMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatService_GetChatInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetChatInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).GetChatInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_GetChatInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).GetChatInfo(ctx, req.(*GetChatInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatService_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -558,6 +694,14 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetChats",
 			Handler:    _ChatService_GetChats_Handler,
+		},
+		{
+			MethodName: "GetContacts",
+			Handler:    _ChatService_GetContacts_Handler,
+		},
+		{
+			MethodName: "StartChat",
+			Handler:    _ChatService_StartChat_Handler,
 		},
 		{
 			MethodName: "GetMessages",
@@ -606,6 +750,14 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RetryMessage",
 			Handler:    _ChatService_RetryMessage_Handler,
+		},
+		{
+			MethodName: "ReactMessage",
+			Handler:    _ChatService_ReactMessage_Handler,
+		},
+		{
+			MethodName: "GetChatInfo",
+			Handler:    _ChatService_GetChatInfo_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

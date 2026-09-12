@@ -561,6 +561,69 @@ func (s *Session) contactName(ctx context.Context, jid types.JID) string {
 	return ""
 }
 
+// GetContacts returns locally synced contacts, including contacts without chats.
+func (s *Session) GetContacts(ctx context.Context) ([]*zchatv1.Contact, error) {
+	client := s.currentClient()
+	if client == nil || client.Store == nil || client.Store.Contacts == nil {
+		return nil, errors.New("session not started")
+	}
+	all, err := client.Store.Contacts.GetAllContacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*zchatv1.Contact, 0, len(all))
+	for jid, info := range all {
+		if jid.Server != types.DefaultUserServer && jid.Server != types.LegacyUserServer {
+			continue
+		}
+		name := info.FullName
+		if name == "" {
+			name = info.BusinessName
+		}
+		if name == "" {
+			name = info.PushName
+		}
+		if name == "" {
+			name = info.FirstName
+		}
+		out = append(out, &zchatv1.Contact{Jid: jid.ToNonAD().String(), Name: name, PhoneNumber: jid.User})
+	}
+	return out, nil
+}
+
+// StartChat creates a direct chat row without sending a message.
+func (s *Session) StartChat(ctx context.Context, recipient string) (*zchatv1.Chat, error) {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
+		return nil, errors.New("recipient is required")
+	}
+	jid, err := types.ParseJID(recipient)
+	if err != nil {
+		clean := strings.TrimPrefix(recipient, "+")
+		if clean == "" || strings.IndexFunc(clean, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			return nil, errors.New("invalid recipient")
+		}
+		jid = types.NewJID(clean, types.DefaultUserServer)
+	}
+	jid = jid.ToNonAD()
+	if jid.Server == types.GroupServer || jid.Server == types.BroadcastServer || jid.User == "" {
+		return nil, errors.New("recipient must be a direct contact")
+	}
+	canonical := s.canonicalChatJID(ctx, jid)
+	chat, err := s.store.GetChat(ctx, canonical)
+	if err != nil {
+		name := s.contactName(ctx, jid)
+		if err := s.store.UpsertChat(ctx, daemonstore.Chat{JID: canonical, Name: name}); err != nil {
+			return nil, err
+		}
+		chat, err = s.store.GetChat(ctx, canonical)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ToProtoChat(chat), nil
+}
+
 func (s *Session) publishChat(ctx context.Context, chatJID string) {
 	chat, err := s.store.GetChat(ctx, chatJID)
 	if err != nil {
@@ -782,16 +845,9 @@ func extractText(msg *waE2E.Message) string {
 
 func toProtoMessage(m daemonstore.Message) *zchatv1.Message {
 	out := &zchatv1.Message{
-		Id:         m.ID,
-		ChatJid:    m.ChatJID,
-		Sender:     m.Sender,
-		SenderName: m.SenderName,
-		Body:       m.Body,
-		Type:       m.Type,
-		Timestamp:  m.Timestamp,
-		Outgoing:   m.Outgoing,
-		Status:     statusToProto(m.Status),
-		Forwarded:  m.Forwarded,
+		Id: m.ID, ChatJid: m.ChatJID, Sender: m.Sender, SenderName: m.SenderName,
+		Body: m.Body, Type: m.Type, Timestamp: m.Timestamp, Outgoing: m.Outgoing,
+		Status: statusToProto(m.Status), Forwarded: m.Forwarded, Reaction: m.Reaction,
 	}
 	if m.Media != nil {
 		out.Media = &zchatv1.MediaInfo{

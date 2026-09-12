@@ -61,6 +61,7 @@ type Message struct {
 	Outgoing   bool
 	Status     string
 	Forwarded  bool
+	Reaction   string
 	Media      *Media
 	Quoted     *Quoted
 }
@@ -192,6 +193,7 @@ var addedColumns = map[string][]struct{ name, decl string }{
 		{"quoted_sender_name", "TEXT"},
 		{"quoted_body", "TEXT"},
 		{"quoted_type", "TEXT"},
+		{"reaction", "TEXT DEFAULT ''"},
 	},
 }
 
@@ -484,8 +486,8 @@ type execer interface {
 
 const insertMessageSQL = `
 INSERT INTO messages (id, chat_jid, sender, sender_name, body, type, timestamp, outgoing, status,
-                      forwarded, quoted_id, quoted_sender, quoted_sender_name, quoted_body, quoted_type)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      forwarded, reaction, quoted_id, quoted_sender, quoted_sender_name, quoted_body, quoted_type)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING`
 
 const insertMediaSQL = `
@@ -500,7 +502,7 @@ func insertMessageTx(ctx context.Context, ex execer, m Message) error {
 	}
 	if _, err := ex.ExecContext(ctx, insertMessageSQL,
 		m.ID, m.ChatJID, m.Sender, m.SenderName, m.Body, m.Type, m.Timestamp, m.Outgoing, m.Status,
-		m.Forwarded, q.ID, q.Sender, q.SenderName, q.Body, q.Type); err != nil {
+		m.Forwarded, m.Reaction, q.ID, q.Sender, q.SenderName, q.Body, q.Type); err != nil {
 		return fmt.Errorf("insert message %s: %w", m.ID, err)
 	}
 	if m.Media == nil {
@@ -540,7 +542,7 @@ func (s *Store) InsertMessages(ctx context.Context, msgs []Message) error {
 const messageColumns = `
 SELECT m.id, m.chat_jid, COALESCE(m.sender, ''), COALESCE(m.sender_name, ''), COALESCE(m.body, ''),
        COALESCE(m.type, ''), COALESCE(m.timestamp, 0), m.outgoing, COALESCE(m.status, ''),
-       COALESCE(m.forwarded, FALSE), COALESCE(m.quoted_id, ''), COALESCE(m.quoted_sender, ''),
+       COALESCE(m.forwarded, FALSE), COALESCE(m.reaction, ''), COALESCE(m.quoted_id, ''), COALESCE(m.quoted_sender, ''),
        COALESCE(m.quoted_sender_name, ''), COALESCE(m.quoted_body, ''), COALESCE(m.quoted_type, ''),
        md.id IS NOT NULL, COALESCE(md.path, ''), COALESCE(md.mime, ''), COALESCE(md.size, 0),
        COALESCE(md.filename, ''), COALESCE(md.caption, ''), md.thumbnail,
@@ -556,7 +558,7 @@ func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
 		hasMedia bool
 	)
 	err := sc.Scan(&m.ID, &m.ChatJID, &m.Sender, &m.SenderName, &m.Body, &m.Type, &m.Timestamp,
-		&m.Outgoing, &m.Status, &m.Forwarded, &q.ID, &q.Sender, &q.SenderName, &q.Body, &q.Type,
+		&m.Outgoing, &m.Status, &m.Forwarded, &m.Reaction, &q.ID, &q.Sender, &q.SenderName, &q.Body, &q.Type,
 		&hasMedia, &md.Path, &md.Mime, &md.Size, &md.Filename,
 		&md.Caption, &md.Thumbnail, &md.Width, &md.Height, &md.Duration)
 	if err != nil {
@@ -739,6 +741,14 @@ func (s *Store) UpdateMessageSender(ctx context.Context, id, sender string) erro
 	_, err := s.db.ExecContext(ctx, `UPDATE messages SET sender = ? WHERE id = ?`, sender, id)
 	if err != nil {
 		return fmt.Errorf("update sender %s: %w", id, err)
+	}
+	return nil
+}
+
+func (s *Store) SetMessageReaction(ctx context.Context, id, reaction string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE messages SET reaction = ? WHERE id = ?`, reaction, id)
+	if err != nil {
+		return fmt.Errorf("set reaction %s: %w", id, err)
 	}
 	return nil
 }

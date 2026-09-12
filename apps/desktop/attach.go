@@ -116,15 +116,15 @@ func (w *window) sendAttachment() {
 	caption := strings.TrimSpace(w.messageEntry.Text())
 	w.messageEntry.SetText("")
 	quotedID := w.replyTo.GetId()
-	w.cancelReply()
-	w.cancelAttachment()
-
-	w.toast("Sending " + filepath.Base(att.path) + "…")
+	w.toast("Uploading " + filepath.Base(att.path) + "…")
 	w.client.SendMedia(w.ctx, w.activeChat, att.path, caption, quotedID, func(err error) {
 		if err != nil {
 			w.log.Error().Err(err).Str("path", att.path).Msg("send media")
 			w.toast("Attachment could not be sent")
+			return
 		}
+		w.cancelAttachment()
+		w.toast("Attachment sent")
 	})
 }
 

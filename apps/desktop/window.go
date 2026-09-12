@@ -25,6 +25,7 @@ import (
 
 var (
 	chatModelType    = gioutil.NewListModelType[*zchatv1.Chat]()
+	contactModelType = gioutil.NewListModelType[*zchatv1.Contact]()
 	messageModelType = gioutil.NewListModelType[*zchatv1.Message]()
 )
 
@@ -34,25 +35,29 @@ type window struct {
 	app  *adw.Application
 	sock string
 
-	win          *adw.ApplicationWindow
-	toastOverlay *adw.ToastOverlay
-	mainStack    *gtk.Stack
-	qrImage      *gtk.Picture
-	splitView    *adw.NavigationSplitView
-	contentPage  *adw.NavigationPage
-	contentTitle *adw.WindowTitle
-	chatList     *gtk.ListView
-	chatFilter   *adw.ToggleGroup
-	messageList  *gtk.ListView
-	messageScrl  *gtk.ScrolledWindow
-	messageEntry *gtk.Entry
-	sendButton   *gtk.Button
-	attachButton *gtk.Button
-	searchEntry  *gtk.SearchEntry
-	replyBar     *gtk.Box
-	replySender  *gtk.Label
-	replyBody    *gtk.Label
-	replyCancel  *gtk.Button
+	win            *adw.ApplicationWindow
+	toastOverlay   *adw.ToastOverlay
+	mainStack      *gtk.Stack
+	qrImage        *gtk.Picture
+	splitView      *adw.NavigationSplitView
+	contentPage    *adw.NavigationPage
+	contentTitle   *adw.WindowTitle
+	chatList       *gtk.ListView
+	chatFilter     *adw.ToggleGroup
+	messageList    *gtk.ListView
+	messageScrl    *gtk.ScrolledWindow
+	messageEntry   *gtk.Entry
+	searchEntry    *gtk.SearchEntry
+	sendButton     *gtk.Button
+	attachButton   *gtk.Button
+	newChatButton  *gtk.Button
+	chatInfoButton *gtk.Button
+	newChatDialog  *adw.Dialog
+	connected      bool
+	replyBar       *gtk.Box
+	replySender    *gtk.Label
+	replyBody      *gtk.Label
+	replyCancel    *gtk.Button
 
 	attachmentBar    *gtk.Box
 	attachmentThumb  *gtk.Picture
@@ -75,6 +80,8 @@ type window struct {
 	stickToBottom     bool
 	bottomQueued      bool
 	scrollingToBottom bool
+	loadingOlder      bool
+	hasOlder          bool
 	presence          map[string]*chatPresence
 	typingTimers      map[string]glib.SourceHandle
 	idleTimer         glib.SourceHandle
@@ -101,29 +108,32 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 	builder := gtk.NewBuilderFromResource("/com/zealish/ZChat/window.ui")
 
 	w := &window{
-		ctx:          ctx,
-		log:          log,
-		app:          app,
-		sock:         socketPath,
-		win:          builder.GetObject("window").Cast().(*adw.ApplicationWindow),
-		toastOverlay: builder.GetObject("toast_overlay").Cast().(*adw.ToastOverlay),
-		mainStack:    builder.GetObject("main_stack").Cast().(*gtk.Stack),
-		qrImage:      builder.GetObject("qr_image").Cast().(*gtk.Picture),
-		splitView:    builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
-		contentPage:  builder.GetObject("content_page").Cast().(*adw.NavigationPage),
-		contentTitle: builder.GetObject("content_title").Cast().(*adw.WindowTitle),
-		chatList:     builder.GetObject("chat_list").Cast().(*gtk.ListView),
-		chatFilter:   builder.GetObject("chat_filter").Cast().(*adw.ToggleGroup),
-		messageList:  builder.GetObject("message_list").Cast().(*gtk.ListView),
-		messageScrl:  builder.GetObject("message_scroll").Cast().(*gtk.ScrolledWindow),
-		messageEntry: builder.GetObject("message_entry").Cast().(*gtk.Entry),
-		sendButton:   builder.GetObject("send_button").Cast().(*gtk.Button),
-		attachButton: builder.GetObject("attach_button").Cast().(*gtk.Button),
-		searchEntry:  builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
-		replyBar:     builder.GetObject("reply_bar").Cast().(*gtk.Box),
-		replySender:  builder.GetObject("reply_sender").Cast().(*gtk.Label),
-		replyBody:    builder.GetObject("reply_body").Cast().(*gtk.Label),
-		replyCancel:  builder.GetObject("reply_cancel").Cast().(*gtk.Button),
+		ctx:            ctx,
+		log:            log,
+		app:            app,
+		sock:           socketPath,
+		win:            builder.GetObject("window").Cast().(*adw.ApplicationWindow),
+		toastOverlay:   builder.GetObject("toast_overlay").Cast().(*adw.ToastOverlay),
+		mainStack:      builder.GetObject("main_stack").Cast().(*gtk.Stack),
+		qrImage:        builder.GetObject("qr_image").Cast().(*gtk.Picture),
+		splitView:      builder.GetObject("split_view").Cast().(*adw.NavigationSplitView),
+		contentPage:    builder.GetObject("content_page").Cast().(*adw.NavigationPage),
+		contentTitle:   builder.GetObject("content_title").Cast().(*adw.WindowTitle),
+		chatList:       builder.GetObject("chat_list").Cast().(*gtk.ListView),
+		chatFilter:     builder.GetObject("chat_filter").Cast().(*adw.ToggleGroup),
+		messageList:    builder.GetObject("message_list").Cast().(*gtk.ListView),
+		messageScrl:    builder.GetObject("message_scroll").Cast().(*gtk.ScrolledWindow),
+		messageEntry:   builder.GetObject("message_entry").Cast().(*gtk.Entry),
+		searchEntry:    builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
+		sendButton:     builder.GetObject("send_button").Cast().(*gtk.Button),
+		attachButton:   builder.GetObject("attach_button").Cast().(*gtk.Button),
+		newChatButton:  builder.GetObject("new_chat_button").Cast().(*gtk.Button),
+		chatInfoButton: builder.GetObject("chat_info_button").Cast().(*gtk.Button),
+
+		replyBar:    builder.GetObject("reply_bar").Cast().(*gtk.Box),
+		replySender: builder.GetObject("reply_sender").Cast().(*gtk.Label),
+		replyBody:   builder.GetObject("reply_body").Cast().(*gtk.Label),
+		replyCancel: builder.GetObject("reply_cancel").Cast().(*gtk.Button),
 
 		attachmentBar:    builder.GetObject("attachment_bar").Cast().(*gtk.Box),
 		attachmentThumb:  builder.GetObject("attachment_thumb").Cast().(*gtk.Picture),
@@ -145,6 +155,8 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 
 	w.win.SetApplication(&app.Application)
 	w.setupChatList()
+	w.newChatButton.ConnectClicked(func() { w.showNewChatDialog() })
+	w.chatInfoButton.ConnectClicked(func() { w.showChatInfo() })
 	w.setupMessageList()
 	w.setupComposer()
 	w.setupSearch()
@@ -160,6 +172,115 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 }
 
 func (w *window) present() { w.win.Present() }
+
+func (w *window) showNewChatDialog() {
+	if w.client == nil || !w.connected || w.newChatDialog != nil {
+		return
+	}
+	d := adw.NewDialog()
+	w.newChatDialog = d
+	d.SetTitle("New chat")
+	d.SetContentWidth(380)
+	d.SetContentHeight(500)
+	view := adw.NewToolbarView()
+	header := adw.NewHeaderBar()
+	view.AddTopBar(header)
+	box := gtk.NewBox(gtk.OrientationVertical, 8)
+	box.SetMarginTop(12)
+	box.SetMarginBottom(12)
+	box.SetMarginStart(12)
+	box.SetMarginEnd(12)
+	entry := gtk.NewSearchEntry()
+	entry.SetPlaceholderText("Search contacts or enter phone number")
+	box.Append(entry)
+	status := gtk.NewLabel("Loading contacts…")
+	status.SetXAlign(0)
+	box.Append(status)
+	model := contactModelType.New()
+	list := gtk.NewListView(gtk.NewNoSelection(model), nil)
+	list.AddCSSClass("navigation-sidebar")
+	box.Append(list)
+	factory := gtk.NewSignalListItemFactory()
+	factory.ConnectSetup(func(obj *coreglib.Object) {
+		item := obj.Cast().(*gtk.ListItem)
+		l := gtk.NewLabel("")
+		l.SetXAlign(0)
+		l.SetMarginTop(10)
+		l.SetMarginBottom(10)
+		l.SetMarginStart(12)
+		item.SetChild(l)
+	})
+	factory.ConnectBind(func(obj *coreglib.Object) {
+		item := obj.Cast().(*gtk.ListItem)
+		c := contactModelType.ObjectValue(item.Item())
+		text := c.GetName()
+		if text == "" {
+			text = c.GetPhoneNumber()
+		}
+		item.Child().(*gtk.Label).SetText(text + "\n" + c.GetPhoneNumber())
+	})
+	list.SetFactory(&factory.ListItemFactory)
+	view.SetContent(box)
+	d.SetChild(view)
+	open := func(recipient string) {
+		recipient = strings.TrimSpace(recipient)
+		if recipient == "" {
+			status.SetText("Enter a phone number or choose a contact")
+			return
+		}
+		if w.client == nil {
+			return
+		}
+		status.SetText("Opening chat…")
+		w.client.StartChat(w.ctx, recipient, func(chat *zchatv1.Chat, err error) {
+			if w.newChatDialog != d {
+				return
+			}
+			if err != nil {
+				status.SetText("Could not open chat: " + err.Error())
+				return
+			}
+			w.upsertChat(chat)
+			d.Close()
+			w.newChatDialog = nil
+			w.openChat(chat)
+		})
+	}
+	list.ConnectActivate(func(pos uint) {
+		if int(pos) < model.Len() {
+			open(model.At(int(pos)).GetJid())
+		}
+	})
+	entry.ConnectSearchChanged(func() {
+		q := strings.ToLower(strings.TrimSpace(entry.Text()))
+		filtered := []*zchatv1.Contact{}
+		for i := 0; i < model.Len(); i++ {
+			c := model.At(i)
+			if q == "" || strings.Contains(strings.ToLower(c.GetName()), q) || strings.Contains(c.GetPhoneNumber(), q) {
+				filtered = append(filtered, c)
+			}
+		}
+		model.Splice(0, model.Len(), filtered...)
+	})
+	entry.ConnectActivate(func() { open(entry.Text()) })
+	d.ConnectClosed(func() {
+		if w.newChatDialog == d {
+			w.newChatDialog = nil
+		}
+	})
+	d.Present(w.win)
+	w.client.GetContacts(w.ctx, func(cs []*zchatv1.Contact, err error) {
+		if w.newChatDialog != d {
+			return
+		}
+		if err != nil {
+			status.SetText("Could not load contacts: " + err.Error())
+			return
+		}
+		model.Splice(0, model.Len(), cs...)
+		status.SetText("Select a contact or enter an international number")
+	})
+}
 
 // connect starts the daemon if needed, then attaches the event stream.
 func (w *window) connect() {
@@ -178,6 +299,7 @@ func (w *window) connect() {
 
 	glib.IdleAdd(func() {
 		w.client = c
+		w.connected = true
 		c.StreamEvents(w.ctx, w.onEvent, func(err error) {
 			w.log.Warn().Err(err).Msg("event stream interrupted")
 			w.toast("Disconnected from daemon")
@@ -195,8 +317,6 @@ func (w *window) onEvent(evt *zchatv1.Event) {
 		w.showQR(payload.QrUpdated.GetCode())
 	case *zchatv1.Event_ConnectionState:
 		w.onConnectionState(payload.ConnectionState)
-	case *zchatv1.Event_ChatUpdated:
-		w.upsertChat(payload.ChatUpdated)
 	case *zchatv1.Event_MessageReceived:
 		w.notify(payload.MessageReceived)
 		w.onMessage(payload.MessageReceived, false)
@@ -210,15 +330,12 @@ func (w *window) onEvent(evt *zchatv1.Event) {
 }
 
 func (w *window) onConnectionState(state *zchatv1.ConnectionState) {
-	switch state.GetStatus() {
-	case zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTED:
+	w.connected = state.GetStatus() == zchatv1.ConnectionStatus_CONNECTION_STATUS_CONNECTED
+	if w.connected {
 		w.mainStack.SetVisibleChildName("chat")
 		w.loadChats()
-	case zchatv1.ConnectionStatus_CONNECTION_STATUS_LOGGED_OUT:
+	} else if state.GetStatus() == zchatv1.ConnectionStatus_CONNECTION_STATUS_LOGGED_OUT {
 		w.mainStack.SetVisibleChildName("qr")
-		if msg := state.GetError(); msg != "" {
-			w.toast("WhatsApp login required: " + msg)
-		}
 	}
 }
 
@@ -490,7 +607,6 @@ func chatMarkers(chat *zchatv1.Chat) string {
 func (w *window) openChat(chat *zchatv1.Chat) {
 	// The previous chat must not be left with a dangling typing indicator.
 	w.stopTyping()
-
 	w.activeChat = chat.GetJid()
 	w.setComposerEnabled(true)
 	w.activeGroup = chat.GetIsGroup()
@@ -504,7 +620,9 @@ func (w *window) openChat(chat *zchatv1.Chat) {
 	if w.client == nil {
 		return
 	}
-	w.client.GetMessages(w.ctx, w.activeChat, func(chatJID string, msgs []*zchatv1.Message, err error) {
+	w.hasOlder = true
+	w.loadingOlder = false
+	w.client.GetMessages(w.ctx, w.activeChat, 0, func(chatJID string, msgs []*zchatv1.Message, err error) {
 		if err != nil {
 			w.log.Error().Err(err).Msg("load messages")
 			w.toast("Could not load messages")
@@ -613,12 +731,37 @@ func (w *window) setupAutoScroll() {
 		}
 	})
 	adj.ConnectValueChanged(func() {
-		// Scrolling away from the bottom releases the pin, but neither our own
-		// programmatic scroll nor the jump a pending relayout causes must.
 		if w.scrollingToBottom || w.bottomQueued {
 			return
 		}
+		if adj.Value() < 80 {
+			w.loadOlderMessages()
+		}
 		w.stickToBottom = adj.Upper()-adj.PageSize()-adj.Value() < 50
+	})
+}
+
+func (w *window) loadOlderMessages() {
+	if w.client == nil || w.activeChat == "" || w.messages.Len() == 0 || w.loadingOlder || !w.hasOlder {
+		return
+	}
+	oldest := w.messages.At(0).GetTimestamp()
+	if oldest == 0 {
+		return
+	}
+	w.loadingOlder = true
+	adj := w.messageScrl.VAdjustment()
+	oldUpper := adj.Upper()
+	w.client.GetMessages(w.ctx, w.activeChat, oldest, func(chatJID string, msgs []*zchatv1.Message, err error) {
+		defer func() { w.loadingOlder = false }()
+		if err != nil || chatJID != w.activeChat || len(msgs) == 0 {
+			if len(msgs) == 0 {
+				w.hasOlder = false
+			}
+			return
+		}
+		w.messages.Splice(0, 0, msgs...)
+		glib.IdleAdd(func() bool { adj.SetValue(adj.Value() + adj.Upper() - oldUpper); return false })
 	})
 }
 
@@ -674,28 +817,21 @@ func (w *window) setupMessageList() {
 
 		bubble.Append(quoted)
 
-		// Attachment area: an optional preview above an open/download button.
 		media := gtk.NewBox(gtk.OrientationVertical, 4)
 		media.SetVisible(false)
-
 		preview := gtk.NewPicture()
 		preview.SetSizeRequest(240, 180)
 		preview.SetContentFit(gtk.ContentFitCover)
 		preview.AddCSSClass("zchat-media")
 		media.Append(preview)
-
 		action := gtk.NewButtonWithLabel("")
 		action.SetHAlign(gtk.AlignStart)
 		media.Append(action)
-
 		bubble.Append(media)
 
 		body := gtk.NewLabel("")
 		body.SetXAlign(0)
 		body.SetWrap(true)
-		// URLs have no break points, so word-only wrapping would make the
-		// label's minimum width as wide as the whole link and stretch the
-		// content pane past the window.
 		body.SetWrapMode(pango.WrapWordChar)
 		body.SetNaturalWrapMode(gtk.NaturalWrapWord)
 		body.SetMaxWidthChars(48)
@@ -707,7 +843,10 @@ func (w *window) setupMessageList() {
 		meta.SetXAlign(1)
 		meta.AddCSSClass("zchat-timestamp")
 		bubble.Append(meta)
-
+		reaction := gtk.NewLabel("")
+		reaction.SetXAlign(1)
+		reaction.AddCSSClass("zchat-reaction")
+		bubble.Append(reaction)
 		onRightClick(bubble, func(x, y float64) {
 			msg := messageModelType.ObjectValue(item.Item())
 			if msg == nil {
@@ -715,7 +854,6 @@ func (w *window) setupMessageList() {
 			}
 			showMenu(bubble, x, y, w.messageMenuEntries(msg))
 		})
-
 		outer.Append(bubble)
 		item.SetChild(outer)
 	})
@@ -759,6 +897,9 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 	media := mediaBoxOf(item)
 	body := media.NextSibling().(*gtk.Label)
 	meta := body.NextSibling().(*gtk.Label)
+	reaction := meta.NextSibling().(*gtk.Label)
+	reaction.SetText(msg.GetReaction())
+	reaction.SetVisible(msg.GetReaction() != "")
 
 	w.bindMedia(media, msg)
 

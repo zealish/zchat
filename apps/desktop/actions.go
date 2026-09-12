@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -134,6 +135,9 @@ func (w *window) messageMenuEntries(msg *zchatv1.Message) []menuEntry {
 	id := msg.GetId()
 	entries := []menuEntry{
 		{label: "Reply", run: func() { w.startReply(msg) }},
+		{label: "React 👍", run: func() { w.reactMessage(id, "👍") }},
+		{label: "React ❤️", run: func() { w.reactMessage(id, "❤️") }},
+		{label: "React 😂", run: func() { w.reactMessage(id, "😂") }},
 		{label: "Copy text", run: func() { w.copyText(msg.GetBody()) }},
 		{label: "Forward", run: func() { w.showForwardDialog(msg) }},
 		{label: "Delete for me", destroy: true, run: func() { w.deleteMessage(id, false) }},
@@ -164,6 +168,18 @@ func (w *window) deleteMessage(id string, revoke bool) {
 		if err != nil {
 			w.log.Error().Err(err).Str("id", id).Msg("delete message")
 			w.toast("Could not delete the message")
+		}
+	})
+}
+
+func (w *window) reactMessage(id, emoji string) {
+	if w.client == nil {
+		return
+	}
+	w.client.ReactMessage(w.ctx, id, emoji, func(err error) {
+		if err != nil {
+			w.log.Error().Err(err).Msg("react message")
+			w.toast("Could not react")
 		}
 	})
 }
@@ -320,5 +336,27 @@ func (w *window) forwardMessage(id string, target *zchatv1.Chat) {
 			return
 		}
 		w.toast("Forwarded to " + name)
+	})
+}
+
+// showChatInfo presents conversation metadata and, for groups, members.
+func (w *window) showChatInfo() {
+	if w.client == nil || w.activeChat == "" {
+		return
+	}
+	w.client.GetChatInfo(w.ctx, w.activeChat, func(resp *zchatv1.GetChatInfoResponse, err error) {
+		if err != nil || resp == nil {
+			w.toast("Could not load chat information")
+			return
+		}
+		chat := resp.GetChat()
+		title := displayName(chat)
+		body := fmt.Sprintf("%s\n%s", title, chat.GetJid())
+		if chat.GetIsGroup() {
+			body += fmt.Sprintf("\n\nMembers: %d", len(resp.GetMembers()))
+		}
+		dialog := adw.NewAlertDialog("Chat information", body)
+		dialog.AddResponse("close", "Close")
+		dialog.Present(w.win)
 	})
 }
