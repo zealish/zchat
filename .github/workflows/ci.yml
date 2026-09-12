@@ -13,9 +13,14 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          dnf install -y golang gcc git make \
+          dnf install -y gcc git make \
             gtk4-devel libadwaita-devel blueprint-compiler
       - uses: actions/checkout@v4
+      # Fedora's golang package trails the go directive in go.mod, so the
+      # toolchain comes from setup-go rather than the container.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Generate UI resources
         run: make ui
       - run: go test ./...
