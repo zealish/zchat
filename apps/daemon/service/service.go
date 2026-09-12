@@ -164,19 +164,17 @@ func (s *Service) GetMessages(ctx context.Context, req *zchatv1.GetMessagesReque
 	}
 
 	// Opening a chat clears its unread badge everywhere, locally and on the
-	// user's phone.
+	// user's phone. A chat that is already read needs neither, and publishing
+	// the update anyway would churn every client's sidebar on each open.
 	if req.GetBeforeTimestamp() == 0 {
-		unread := int32(0)
-		if chat, err := s.store.GetChat(ctx, chatJID); err == nil {
-			unread = chat.Unread
-		}
-		if err := s.store.ClearUnread(ctx, chatJID); err != nil {
-			s.log.Warn().Err(err).Str("chat", chatJID).Msg("clear unread")
-		} else if chat, err := s.store.GetChat(ctx, chatJID); err == nil {
-			s.broker.Publish(&zchatv1.Event{Payload: &zchatv1.Event_ChatUpdated{ChatUpdated: wa.ToProtoChat(chat)}})
-		}
-		if unread > 0 {
-			if err := s.session.MarkRead(ctx, chatJID, int(unread)); err != nil {
+		chat, err := s.store.GetChat(ctx, chatJID)
+		if err == nil && chat.Unread > 0 {
+			if err := s.store.ClearUnread(ctx, chatJID); err != nil {
+				s.log.Warn().Err(err).Str("chat", chatJID).Msg("clear unread")
+			} else if updated, err := s.store.GetChat(ctx, chatJID); err == nil {
+				s.broker.Publish(&zchatv1.Event{Payload: &zchatv1.Event_ChatUpdated{ChatUpdated: wa.ToProtoChat(updated)}})
+			}
+			if err := s.session.MarkRead(ctx, chatJID, int(chat.Unread)); err != nil {
 				s.log.Warn().Err(err).Str("chat", chatJID).Msg("send read receipt")
 			}
 		}

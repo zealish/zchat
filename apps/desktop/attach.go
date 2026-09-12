@@ -9,7 +9,6 @@ import (
 
 	coreglib "github.com/diamondburned/gotk4/pkg/core/glib"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
-	"github.com/diamondburned/gotk4/pkg/gdkpixbuf/v2"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 
@@ -74,27 +73,28 @@ func (w *window) showAttachmentBar() {
 	w.attachmentName.SetText(filepath.Base(att.path))
 	w.attachmentSize.SetText(humanSize(att.size))
 
-	// The composer preview is a still, so only the first frame is used.
-	var thumb *gdkpixbuf.Pixbuf
-	if strings.HasPrefix(att.mime, "image/") {
-		anim, err := w.loadAnimation(att.path)
-		if err != nil {
-			w.log.Warn().Err(err).Str("path", att.path).Msg("render attachment thumbnail")
-		} else {
-			thumb = anim.frames[0]
-		}
-	}
-	if thumb != nil {
-		w.attachmentThumb.SetPixbuf(thumb)
-		w.attachmentThumb.SetVisible(true)
-		w.attachmentIcon.SetVisible(false)
-	} else {
-		w.attachmentThumb.SetVisible(false)
-		w.attachmentIcon.SetFromGIcon(gio.ContentTypeGetIcon(att.mime))
-		w.attachmentIcon.SetVisible(true)
-	}
+	w.attachmentThumb.SetVisible(false)
+	w.attachmentIcon.SetFromGIcon(gio.ContentTypeGetIcon(att.mime))
+	w.attachmentIcon.SetVisible(true)
 	w.attachmentBar.SetVisible(true)
 	w.messageEntry.SetPlaceholderText("Add a caption")
+
+	if !strings.HasPrefix(att.mime, "image/") {
+		return
+	}
+	// Decoding runs off the main loop, so the staged file may have been
+	// cancelled or replaced by the time the image lands. The icon stays up
+	// until then.
+	path := att.path
+	w.loadAnimation(path, func(anim *animation) {
+		if anim == nil || w.pending == nil || w.pending.path != path {
+			return
+		}
+		// The composer preview is a still, so only the first frame is used.
+		w.attachmentThumb.SetPixbuf(anim.frames[0])
+		w.attachmentThumb.SetVisible(true)
+		w.attachmentIcon.SetVisible(false)
+	})
 }
 
 // cancelAttachment drops the staged file without sending it.

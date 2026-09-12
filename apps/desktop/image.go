@@ -2,6 +2,9 @@ package main
 
 import (
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
 
@@ -20,12 +23,25 @@ import (
 // once, so they are scaled down before being handed to GTK.
 const maxFrameSize = 192
 
+// maxStillSize bounds a still photo. Previews render at 240x180, so anything
+// larger is only paid for in decode time and memory.
+const maxStillSize = 512
+
 // defaultFrameDelay is used for frames whose delay is missing or absurdly
 // short, matching how browsers clamp animation timings.
 const defaultFrameDelay = 100
 
-// animation is a decoded image: a single frame for stills, several for
-// animated stickers. delays is empty when there is nothing to animate.
+// rawAnimation is a decoded image in plain Go form. Decoding happens on a
+// worker goroutine, which may not touch GTK, so pixbufs are built from this on
+// the main loop afterwards.
+type rawAnimation struct {
+	frames []*image.RGBA
+	delays []int // milliseconds, one per frame
+}
+
+// animation is a decoded image ready for GTK: a single frame for stills,
+// several for animated stickers. delays is empty when there is nothing to
+// animate.
 type animation struct {
 	frames []*gdkpixbuf.Pixbuf
 	delays []int // milliseconds, one per frame
@@ -33,20 +49,59 @@ type animation struct {
 
 func (a *animation) animated() bool { return len(a.frames) > 1 }
 
-// loadAnimation decodes an image file, going through the Go WebP decoder for
-// WebP and leaving every other format to gdk-pixbuf. Results are cached because
-// the ListView rebinds rows constantly while scrolling.
-func (w *window) loadAnimation(path string) (*animation, error) {
+// loadAnimation resolves a decoded image and hands it to done, with nil when
+// the file could not be read.
+//
+// Decoding a sticker takes tens of milliseconds per frame, which freezes the
+// window when it runs during a list bind, so it is pushed onto a worker
+// goroutine. done is always invoked on the main loop, immediately for a cache
+// hit and later otherwise, so callers must re-check that the row they are
+// filling still wants this image.
+//
+// Results are cached because the ListView rebinds rows constantly while
+// scrolling, and concurrent requests for the same path share one decode.
+func (w *window) loadAnimation(path string, done func(*animation)) {
 	if cached, ok := w.animCache[path]; ok {
-		return cached, nil
+		done(cached)
+		return
 	}
+	if waiters, inFlight := w.animPending[path]; inFlight {
+		w.animPending[path] = append(waiters, done)
+		return
+	}
+	w.animPending[path] = []func(*animation){done}
 
-	anim, err := decodeAnimation(path)
-	if err != nil {
-		return nil, err
+	go func() {
+		raw, err := decodeAnimation(path)
+		glib.IdleAdd(func() {
+			waiters := w.animPending[path]
+			delete(w.animPending, path)
+
+			var anim *animation
+			if err != nil {
+				w.log.Warn().Err(err).Str("path", path).Msg("decode media preview")
+			} else {
+				anim = raw.toAnimation()
+				w.animCache[path] = anim
+			}
+			for _, waiter := range waiters {
+				waiter(anim)
+			}
+		})
+	}()
+}
+
+// toAnimation uploads decoded frames into pixbufs. It must run on the main
+// loop.
+func (r *rawAnimation) toAnimation() *animation {
+	anim := &animation{
+		frames: make([]*gdkpixbuf.Pixbuf, 0, len(r.frames)),
+		delays: r.delays,
 	}
-	w.animCache[path] = anim
-	return anim, nil
+	for _, frame := range r.frames {
+		anim.frames = append(anim.frames, pixbufFromImage(frame))
+	}
+	return anim
 }
 
 // showAnimation renders a decoded image into a Picture, starting a frame timer
@@ -83,7 +138,9 @@ func (w *window) stopAnimation(preview *gtk.Picture) {
 	}
 }
 
-func decodeAnimation(path string) (*animation, error) {
+// decodeAnimation reads an image file into plain Go frames. It touches no GTK
+// state, so it is safe to call from a worker goroutine.
+func decodeAnimation(path string) (*rawAnimation, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -94,28 +151,29 @@ func decodeAnimation(path string) (*animation, error) {
 	if _, err := io.ReadFull(f, header[:]); err != nil {
 		return nil, err
 	}
-	if string(header[0:4]) != "RIFF" || string(header[8:12]) != "WEBP" {
-		pixbuf, err := gdkpixbuf.NewPixbufFromFile(path)
-		if err != nil {
-			return nil, err
-		}
-		return &animation{frames: []*gdkpixbuf.Pixbuf{pixbuf}}, nil
-	}
-
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
+
+	if string(header[0:4]) != "RIFF" || string(header[8:12]) != "WEBP" {
+		img, _, err := image.Decode(f)
+		if err != nil {
+			return nil, err
+		}
+		return &rawAnimation{frames: []*image.RGBA{scaleDown(img, maxStillSize)}}, nil
+	}
+
 	decoded, err := webp.DecodeAll(f)
 	if err != nil {
 		return nil, err
 	}
 
-	anim := &animation{
-		frames: make([]*gdkpixbuf.Pixbuf, 0, len(decoded.Image)),
+	anim := &rawAnimation{
+		frames: make([]*image.RGBA, 0, len(decoded.Image)),
 		delays: make([]int, 0, len(decoded.Image)),
 	}
 	for i, img := range decoded.Image {
-		anim.frames = append(anim.frames, pixbufFromImage(scaleDown(img, maxFrameSize)))
+		anim.frames = append(anim.frames, scaleDown(img, maxFrameSize))
 
 		delay := defaultFrameDelay
 		if i < len(decoded.Delay) && decoded.Delay[i] >= 10 {

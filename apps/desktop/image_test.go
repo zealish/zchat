@@ -18,15 +18,16 @@ func TestDecodeAnimationWebP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeAnimation: %v", err)
 	}
-	if !anim.animated() {
+	if len(anim.frames) < 2 {
 		t.Fatalf("got %d frames, want more than one", len(anim.frames))
 	}
 	if len(anim.delays) != len(anim.frames) {
 		t.Fatalf("got %d delays for %d frames", len(anim.delays), len(anim.frames))
 	}
 	for i, frame := range anim.frames {
-		if w, h := frame.Width(), frame.Height(); w > maxFrameSize || h > maxFrameSize {
-			t.Errorf("frame %d is %dx%d, want both sides <= %d", i, w, h, maxFrameSize)
+		size := frame.Bounds().Size()
+		if size.X > maxFrameSize || size.Y > maxFrameSize {
+			t.Errorf("frame %d is %dx%d, want both sides <= %d", i, size.X, size.Y, maxFrameSize)
 		}
 		if anim.delays[i] < 10 {
 			t.Errorf("frame %d delay is %dms, want the clamped minimum", i, anim.delays[i])
@@ -46,10 +47,10 @@ func TestDecodeAnimationStill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeAnimation: %v", err)
 	}
-	if anim.animated() {
+	if len(anim.frames) != 1 {
 		t.Fatalf("got %d frames, want one", len(anim.frames))
 	}
-	if anim.frames[0].Width() == 0 || anim.frames[0].Height() == 0 {
+	if anim.frames[0].Bounds().Empty() {
 		t.Fatal("decoded frame is empty")
 	}
 }

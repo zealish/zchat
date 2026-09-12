@@ -40,47 +40,49 @@ type window struct {
 	app  *adw.Application
 	sock string
 
-	win            *adw.ApplicationWindow
-	toastOverlay   *adw.ToastOverlay
-	mainStack      *gtk.Stack
-	qrImage        *gtk.Picture
-	syncPage       *adw.StatusPage
-	syncProgress   *gtk.ProgressBar
-	syncDetail     *gtk.Label
-	syncCounts     *gtk.Label
-	syncing        bool
-	syncPulse      glib.SourceHandle
-	splitView      *adw.NavigationSplitView
-	contentPage    *adw.NavigationPage
-	contentTitle   *adw.WindowTitle
-	headerAvatar   *adw.Avatar
-	chatList       *gtk.ListView
-	chatFilter     *adw.ToggleGroup
-	messageList    *gtk.ListView
-	messageScrl    *gtk.ScrolledWindow
-	messageEntry   *gtk.Entry
-	searchEntry    *gtk.SearchEntry
-	sendButton     *gtk.Button
-	attachButton   *gtk.Button
-	emojiButton    *gtk.MenuButton
-	newChatButton  *gtk.Button
-	chatInfoButton *gtk.Button
-	newChatDialog  *adw.Dialog
-	connected      bool
-	ownJID         string
-	connStatus     string
-	replyBar       *gtk.Box
-	replySender    *gtk.Label
-	replyBody      *gtk.Label
-	replyCancel    *gtk.Button
-	findBar        *gtk.SearchBar
-	findEntry      *gtk.SearchEntry
-	findStatus     *gtk.Label
-	findPrev       *gtk.Button
-	findNext       *gtk.Button
-	findMatches    []string
-	findIndex      int
-	findCurrent    string
+	win             *adw.ApplicationWindow
+	toastOverlay    *adw.ToastOverlay
+	mainStack       *gtk.Stack
+	qrImage         *gtk.Picture
+	syncPage        *adw.StatusPage
+	syncProgress    *gtk.ProgressBar
+	syncDetail      *gtk.Label
+	syncCounts      *gtk.Label
+	syncing         bool
+	syncPulse       glib.SourceHandle
+	splitView       *adw.NavigationSplitView
+	contentPage     *adw.NavigationPage
+	contentTitle    *adw.WindowTitle
+	headerAvatar    *adw.Avatar
+	chatList        *gtk.ListView
+	chatFilter      *adw.ToggleGroup
+	messageList     *gtk.ListView
+	messageScrl     *gtk.ScrolledWindow
+	messageEntry    *gtk.Entry
+	searchEntry     *gtk.SearchEntry
+	sendButton      *gtk.Button
+	attachButton    *gtk.Button
+	emojiButton     *gtk.MenuButton
+	reactionChooser *gtk.EmojiChooser
+	reactionTarget  string
+	newChatButton   *gtk.Button
+	chatInfoButton  *gtk.Button
+	newChatDialog   *adw.Dialog
+	connected       bool
+	ownJID          string
+	connStatus      string
+	replyBar        *gtk.Box
+	replySender     *gtk.Label
+	replyBody       *gtk.Label
+	replyCancel     *gtk.Button
+	findBar         *gtk.SearchBar
+	findEntry       *gtk.SearchEntry
+	findStatus      *gtk.Label
+	findPrev        *gtk.Button
+	findNext        *gtk.Button
+	findMatches     []string
+	findIndex       int
+	findCurrent     string
 
 	attachmentBar    *gtk.Box
 	attachmentThumb  *gtk.Picture
@@ -91,6 +93,7 @@ type window struct {
 
 	chats             *gioutil.ListModel[*zchatv1.Chat]
 	chatSel           *gtk.SingleSelection
+	chatRows          map[string]*gtk.ListItem
 	messages          *gioutil.ListModel[*zchatv1.Message]
 	messageRows       map[string]*gtk.ListItem
 	chatOrder         []*zchatv1.Chat
@@ -109,7 +112,9 @@ type window struct {
 	typingTimers      map[string]glib.SourceHandle
 	idleTimer         glib.SourceHandle
 	animCache         map[string]*animation
+	animPending       map[string][]func(*animation)
 	animTimers        map[*gtk.Picture]glib.SourceHandle
+	previewPaths      map[*gtk.Picture]string
 	avatars           map[string]*gdk.Texture
 	avatarRows        map[*adw.Avatar]string
 
@@ -183,12 +188,15 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		chats:         chatModelType.New(),
 		messages:      messageModelType.New(),
 		chatIndex:     make(map[string]*zchatv1.Chat),
+		chatRows:      make(map[string]*gtk.ListItem),
 		messageRows:   make(map[string]*gtk.ListItem),
 		mediaHandlers: make(map[*gtk.Button]coreglib.SignalHandle),
 		presence:      make(map[string]*chatPresence),
 		typingTimers:  make(map[string]glib.SourceHandle),
 		animCache:     make(map[string]*animation),
+		animPending:   make(map[string][]func(*animation)),
 		animTimers:    make(map[*gtk.Picture]glib.SourceHandle),
+		previewPaths:  make(map[*gtk.Picture]string),
 		avatars:       make(map[string]*gdk.Texture),
 		avatarRows:    make(map[*adw.Avatar]string),
 		settings:      loadSettings(),
@@ -242,7 +250,15 @@ func (w *window) showNewChatDialog() {
 	model := contactModelType.New()
 	list := gtk.NewListView(gtk.NewNoSelection(model), nil)
 	list.AddCSSClass("navigation-sidebar")
-	box.Append(list)
+	list.SetSingleClickActivate(true)
+	// Without a scrolling viewport the ListView is given unlimited height and
+	// builds a row for every contact up front, which stalls the dialog on a
+	// large address book.
+	scroll := gtk.NewScrolledWindow()
+	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
+	scroll.SetVExpand(true)
+	scroll.SetChild(list)
+	box.Append(scroll)
 	factory := gtk.NewSignalListItemFactory()
 	factory.ConnectSetup(func(obj *coreglib.Object) {
 		item := obj.Cast().(*gtk.ListItem)
@@ -474,12 +490,13 @@ func (w *window) showQR(code string) {
 // loadChats fetches both the active and archived lists. They are kept in one
 // slice and split by the sidebar filter, so a chat that is archived from
 // another device simply moves between tabs without a refetch.
+//
+// Chats already on screen are merged rather than replaced, so a refetch after
+// a reconnect leaves the sidebar's rows and scroll position alone.
 func (w *window) loadChats() {
 	if w.client == nil {
 		return
 	}
-	w.chatOrder = nil
-	w.chatIndex = make(map[string]*zchatv1.Chat)
 	for _, archived := range []bool{false, true} {
 		w.client.GetChats(w.ctx, archived, func(_ bool, chats []*zchatv1.Chat, err error) {
 			if err != nil {
@@ -494,22 +511,38 @@ func (w *window) loadChats() {
 	}
 }
 
-// upsertChat replaces a chat and schedules a sidebar refresh. History sync
-// delivers hundreds of these in bursts, so rebuilds are coalesced rather than
-// run per event.
+// upsertChat merges a chat into the sidebar and schedules a refresh. History
+// sync delivers hundreds of these in bursts, so rebuilds are coalesced rather
+// than run per event.
+//
+// An existing chat is updated in place rather than swapped for the incoming
+// pointer. The list model holds these pointers, so replacing one makes the row
+// look new and forces a splice that destroys its widget — which drops the
+// sidebar's scroll position and the focused row. Opening a chat clears its
+// unread badge, so this path runs on every single click.
 func (w *window) upsertChat(chat *zchatv1.Chat) {
 	if existing, ok := w.chatIndex[chat.GetJid()]; ok {
-		for i, c := range w.chatOrder {
-			if c == existing {
-				w.chatOrder[i] = chat
-				break
-			}
-		}
-	} else {
-		w.chatOrder = append(w.chatOrder, chat)
+		copyChatInto(existing, chat)
+		w.refreshChatRow(existing)
+		w.scheduleChatRebuild()
+		return
 	}
+	w.chatOrder = append(w.chatOrder, chat)
 	w.chatIndex[chat.GetJid()] = chat
 	w.scheduleChatRebuild()
+}
+
+// copyChatInto overwrites dst's displayed and ordering fields with src's,
+// keeping the pointer the list model already holds.
+func copyChatInto(dst, src *zchatv1.Chat) {
+	dst.Name = src.GetName()
+	dst.Unread = src.GetUnread()
+	dst.Archived = src.GetArchived()
+	dst.Pinned = src.GetPinned()
+	dst.LastMessage = src.GetLastMessage()
+	dst.UpdatedAt = src.GetUpdatedAt()
+	dst.IsGroup = src.GetIsGroup()
+	dst.MutedUntil = src.GetMutedUntil()
 }
 
 // removeChat drops a chat the daemon no longer has, such as one merged into
@@ -543,9 +576,20 @@ func (w *window) scheduleChatRebuild() {
 
 func (w *window) rebuildChatModel() {
 	// A search shows daemon-ranked results verbatim, ignoring the sidebar
-	// filter so a query never silently hides matches on another tab.
+	// filter so a query never silently hides matches on another tab. The
+	// results are fresh pointers, so known chats are swapped back to the ones
+	// the model already holds to keep their rows.
 	if w.searchQuery != "" {
-		w.chats.Splice(0, w.chats.Len(), w.searchResults...)
+		results := make([]*zchatv1.Chat, 0, len(w.searchResults))
+		for _, c := range w.searchResults {
+			if existing, ok := w.chatIndex[c.GetJid()]; ok {
+				copyChatInto(existing, c)
+				w.refreshChatRow(existing)
+				c = existing
+			}
+			results = append(results, c)
+		}
+		w.applyChatModel(results)
 		return
 	}
 
@@ -564,10 +608,9 @@ func (w *window) rebuildChatModel() {
 		}
 	}
 
-	selected := w.activeChat
-	w.chats.Splice(0, w.chats.Len(), visible...)
+	w.applyChatModel(visible)
 
-	if selected != "" {
+	if selected := w.activeChat; selected != "" {
 		for i, c := range visible {
 			if c.GetJid() == selected {
 				w.chatSel.SetSelected(uint(i))
@@ -575,6 +618,46 @@ func (w *window) rebuildChatModel() {
 			}
 		}
 	}
+}
+
+// applyChatModel moves the list model onto visible with the smallest splice
+// that covers the difference.
+//
+// Replacing the whole model would destroy and rebuild every row, which resets
+// the sidebar's scroll position to the top. Most updates — an unread badge
+// being cleared, a new last message — only touch one row, so the untouched
+// head and tail are left in place.
+func (w *window) applyChatModel(visible []*zchatv1.Chat) {
+	current := make([]*zchatv1.Chat, w.chats.Len())
+	for i := range current {
+		current[i] = w.chats.At(i)
+	}
+
+	head, removals, changed := spliceRange(current, visible)
+	if !changed {
+		return
+	}
+	w.chats.Splice(head, removals, visible[head:len(visible)-(len(current)-head-removals)]...)
+}
+
+// spliceRange finds the shortest run that turns current into want: the index to
+// splice at and how many entries to drop there. changed is false when the two
+// already match.
+func spliceRange[T comparable](current, want []T) (position, removals int, changed bool) {
+	head := 0
+	for head < len(current) && head < len(want) && current[head] == want[head] {
+		head++
+	}
+	if head == len(current) && head == len(want) {
+		return 0, 0, false
+	}
+
+	tail := 0
+	for tail < len(current)-head && tail < len(want)-head &&
+		current[len(current)-1-tail] == want[len(want)-1-tail] {
+		tail++
+	}
+	return head, len(current) - head - tail, true
 }
 
 // filterMatches reports whether a chat belongs on the currently selected tab.
@@ -622,6 +705,9 @@ func (w *window) setupChatList() {
 	w.chatSel = gtk.NewSingleSelection(w.chats)
 	w.chatSel.SetAutoselect(false)
 	w.chatList.SetModel(w.chatSel)
+	// Without this a row only activates on the second click: the first one
+	// just moves the selection.
+	w.chatList.SetSingleClickActivate(true)
 
 	w.chatFilter.NotifyProperty("active", func() {
 		switch w.chatFilter.ActiveName() {
@@ -690,34 +776,15 @@ func (w *window) setupChatList() {
 	factory.ConnectBind(func(obj *coreglib.Object) {
 		item := obj.Cast().(*gtk.ListItem)
 		chat := chatModelType.ObjectValue(item.Item())
-
-		row := item.Child().(*gtk.Box)
-		avatar := row.FirstChild().(*adw.Avatar)
-		text := avatar.NextSibling().(*gtk.Box)
-		markers := text.NextSibling().(*gtk.Label)
-		unread := markers.NextSibling().(*gtk.Label)
-
-		name := text.FirstChild().(*gtk.Label)
-		preview := name.NextSibling().(*gtk.Label)
-
-		display := displayName(chat)
-		avatar.SetText(display)
-		w.bindAvatar(avatar, chat.GetJid())
-		name.SetText(display)
-		preview.SetText(chat.GetLastMessage())
-
-		markers.SetText(chatMarkers(chat))
-		markers.SetVisible(markers.Text() != "")
-
-		if chat.GetUnread() > 0 {
-			unread.SetText(fmt.Sprintf("%d", chat.GetUnread()))
-			unread.SetVisible(true)
-		} else {
-			unread.SetVisible(false)
-		}
+		w.chatRows[chat.GetJid()] = item
+		w.bindChatRow(item, chat)
 	})
 	factory.ConnectUnbind(func(obj *coreglib.Object) {
 		item := obj.Cast().(*gtk.ListItem)
+		chat := chatModelType.ObjectValue(item.Item())
+		if w.chatRows[chat.GetJid()] == item {
+			delete(w.chatRows, chat.GetJid())
+		}
 		row := item.Child().(*gtk.Box)
 		w.unbindAvatar(row.FirstChild().(*adw.Avatar))
 	})
@@ -729,6 +796,42 @@ func (w *window) setupChatList() {
 		}
 		w.openChat(w.chats.At(int(position)))
 	})
+}
+
+// bindChatRow fills a sidebar row's widgets from a chat.
+func (w *window) bindChatRow(item *gtk.ListItem, chat *zchatv1.Chat) {
+	row := item.Child().(*gtk.Box)
+	avatar := row.FirstChild().(*adw.Avatar)
+	text := avatar.NextSibling().(*gtk.Box)
+	markers := text.NextSibling().(*gtk.Label)
+	unread := markers.NextSibling().(*gtk.Label)
+
+	name := text.FirstChild().(*gtk.Label)
+	preview := name.NextSibling().(*gtk.Label)
+
+	display := displayName(chat)
+	avatar.SetText(display)
+	w.bindAvatar(avatar, chat.GetJid())
+	name.SetText(display)
+	preview.SetText(chat.GetLastMessage())
+
+	markers.SetText(chatMarkers(chat))
+	markers.SetVisible(markers.Text() != "")
+
+	if chat.GetUnread() > 0 {
+		unread.SetText(fmt.Sprintf("%d", chat.GetUnread()))
+		unread.SetVisible(true)
+	} else {
+		unread.SetVisible(false)
+	}
+}
+
+// refreshChatRow repaints a row whose chat was updated in place. The model
+// emits no change for that, since the pointer it holds is unchanged.
+func (w *window) refreshChatRow(chat *zchatv1.Chat) {
+	if item, ok := w.chatRows[chat.GetJid()]; ok {
+		w.bindChatRow(item, chat)
+	}
 }
 
 // chatMarkers renders the pinned and muted state as a compact glyph pair.
@@ -867,8 +970,10 @@ func (w *window) applyScrollToBottom() {
 func (w *window) setupAutoScroll() {
 	adj := w.messageScrl.VAdjustment()
 	// "changed" fires once the ListView has measured newly appended rows.
+	// applyScrollToBottom moves the adjustment itself, which re-emits
+	// "changed", so the guard keeps that from recursing per frame.
 	adj.ConnectChanged(func() {
-		if w.stickToBottom {
+		if w.stickToBottom && !w.scrollingToBottom {
 			w.applyScrollToBottom()
 		}
 	})
@@ -1033,8 +1138,11 @@ func (w *window) setupMessageList() {
 		if w.messageRows[msg.GetId()] == item {
 			delete(w.messageRows, msg.GetId())
 		}
-		// A row scrolled out of view must not keep ticking its animation.
-		w.stopAnimation(mediaPreviewOf(item))
+		// A row scrolled out of view must not keep ticking its animation, and
+		// an in-flight decode for it is no longer wanted.
+		preview := mediaPreviewOf(item)
+		w.stopAnimation(preview)
+		delete(w.previewPaths, preview)
 	})
 	w.messageList.SetFactory(&factory.ListItemFactory)
 }
@@ -1194,21 +1302,26 @@ func (w *window) bindMedia(media *gtk.Box, msg *zchatv1.Message) {
 	local := info.GetPath()
 	switch {
 	case local != "" && isVisualMedia(msg.GetType()):
-		if anim, err := w.loadAnimation(local); err == nil {
+		// Decoding is asynchronous, so the row may already show another
+		// message by the time it lands. The path the preview was last bound
+		// to says whether the result is still wanted.
+		w.previewPaths[preview] = local
+		if thumb := info.GetThumbnail(); len(thumb) > 0 {
+			w.showThumbnail(preview, thumb)
+		}
+		w.loadAnimation(local, func(anim *animation) {
+			if anim == nil || w.previewPaths[preview] != local {
+				return
+			}
+			w.stopAnimation(preview)
 			w.showAnimation(preview, anim)
 			preview.SetVisible(true)
-		} else {
-			w.log.Warn().Err(err).Str("path", local).Msg("render media preview")
-			preview.SetVisible(false)
-		}
+		})
 	case len(info.GetThumbnail()) > 0:
-		if pixbuf, err := pixbufFromBytes(w.ctx, info.GetThumbnail()); err == nil {
-			preview.SetPixbuf(pixbuf)
-			preview.SetVisible(true)
-		} else {
-			preview.SetVisible(false)
-		}
+		delete(w.previewPaths, preview)
+		w.showThumbnail(preview, info.GetThumbnail())
 	default:
+		delete(w.previewPaths, preview)
 		preview.SetVisible(false)
 	}
 
@@ -1239,6 +1352,19 @@ func (w *window) bindMedia(media *gtk.Box, msg *zchatv1.Message) {
 func (w *window) openFile(path string) {
 	launcher := gtk.NewFileLauncher(gio.NewFileForPath(path))
 	launcher.Launch(w.ctx, &w.win.Window, nil)
+}
+
+// showThumbnail paints the small inline preview WhatsApp ships with a message.
+// It stands in until the full image finishes decoding, so an attachment never
+// pops in from an empty box.
+func (w *window) showThumbnail(preview *gtk.Picture, thumbnail []byte) {
+	pixbuf, err := pixbufFromBytes(w.ctx, thumbnail)
+	if err != nil {
+		preview.SetVisible(false)
+		return
+	}
+	preview.SetPixbuf(pixbuf)
+	preview.SetVisible(true)
 }
 
 func isVisualMedia(kind string) bool {

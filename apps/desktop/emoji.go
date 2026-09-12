@@ -17,15 +17,27 @@ func (w *window) setupEmojiChooser() {
 
 // showReactionChooser pops an emoji chooser over a message bubble so any emoji
 // can be sent as a reaction, not just the quick ones in the context menu.
+//
+// A GtkEmojiChooser fills itself with several thousand widgets, which costs a
+// visible stall the first time it is built. One instance is kept and reparented
+// onto whichever bubble is being reacted to, so that cost is paid only once.
 func (w *window) showReactionChooser(anchor gtk.Widgetter, x, y float64, messageID string) {
-	chooser := gtk.NewEmojiChooser()
-	chooser.SetHasArrow(false)
-	chooser.SetParent(anchor)
-	chooser.ConnectEmojiPicked(func(text string) { w.reactMessage(messageID, text) })
-	chooser.ConnectClosed(func() { chooser.Unparent() })
+	if w.reactionChooser == nil {
+		chooser := gtk.NewEmojiChooser()
+		chooser.SetHasArrow(false)
+		chooser.ConnectEmojiPicked(func(text string) {
+			w.reactMessage(w.reactionTarget, text)
+		})
+		chooser.ConnectClosed(func() { chooser.Unparent() })
+		w.reactionChooser = chooser
+	}
+
+	w.reactionTarget = messageID
+	w.reactionChooser.Unparent()
+	w.reactionChooser.SetParent(anchor)
 	rect := gdk.NewRectangle(int(x), int(y), 1, 1)
-	chooser.SetPointingTo(&rect)
-	chooser.Popup()
+	w.reactionChooser.SetPointingTo(&rect)
+	w.reactionChooser.Popup()
 }
 
 // insertEmoji replaces the current selection, if any, with text and leaves the
