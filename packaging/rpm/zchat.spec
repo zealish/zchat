@@ -15,7 +15,7 @@
 %global _binary_payload w3.zstdio
 
 Name:           zchat
-Version:        %{?_zchat_version}%{!?_zchat_version:0.5.0}
+Version:        %{?_zchat_version}%{!?_zchat_version:0.6.0}
 Release:        1%{?dist}
 Summary:        Native Linux desktop client for WhatsApp Multi-Device
 
@@ -80,6 +80,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Sat Sep 12 2026 Zealish <dev@zealish.com> - 0.6.0-1
+- Emoji picker, find in conversation and a preferences dialog
+
 * Fri Sep 11 2026 Zealish <dev@zealish.com> - 0.5.0-1
 - Typing indicators, contact presence and animated WebP stickers
 

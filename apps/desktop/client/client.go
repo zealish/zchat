@@ -235,6 +235,22 @@ func (c *Client) SearchChats(ctx context.Context, query string, onDone func(stri
 	}()
 }
 
+// SearchMessages queries message bodies off the main loop. chatJID scopes the
+// search to one conversation; empty searches every chat.
+func (c *Client) SearchMessages(ctx context.Context, query, chatJID string, onDone func(string, []*zchatv1.Message, error)) {
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+
+		resp, err := c.svc.SearchMessages(callCtx, &zchatv1.SearchMessagesRequest{Query: query, ChatJid: chatJID})
+		var messages []*zchatv1.Message
+		if resp != nil {
+			messages = resp.GetMessages()
+		}
+		idle(func() { onDone(query, messages, err) })
+	}()
+}
+
 // DownloadMedia fetches an attachment off the main loop. Media transfers can
 // far outlast a regular call, so they use the caller's context directly.
 func (c *Client) DownloadMedia(ctx context.Context, messageID string, onDone func(*zchatv1.Message, error)) {

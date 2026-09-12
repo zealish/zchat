@@ -14,13 +14,19 @@ func (w *window) setupShortcuts() {
 		accels []string
 		run    func()
 	}{
-		{"search", []string{"<Control>k", "<Control>f"}, w.focusSearch},
+		{"search", []string{"<Control>k"}, w.focusSearch},
+		{"find", []string{"<Control>f"}, w.toggleFind},
 		{"new-chat", []string{"<Control>n"}, w.showNewChatDialog},
 		{"focus-chats", []string{"<Control>l"}, w.focusChatList},
 		{"mute-chat", []string{"<Control><Shift>m"}, w.toggleMuteActiveChat},
+		{"shortcuts", []string{"<Control>question"}, w.showShortcutsHelp},
 		{"close", []string{"<Control>w"}, func() { w.win.Close() }},
 		{"quit", []string{"<Control>q"}, func() { w.app.Quit() }},
 		{"cancel", []string{"Escape"}, w.escape},
+		// Menu-only entries: no accelerator, but the primary menu needs the
+		// actions to exist in the same "win" group.
+		{"preferences", nil, w.showSettings},
+		{"about", nil, w.showAbout},
 	}
 
 	group := gio.NewSimpleActionGroup()
@@ -29,7 +35,9 @@ func (w *window) setupShortcuts() {
 		action := gio.NewSimpleAction(entry.name, nil)
 		action.ConnectActivate(func(*glib.Variant) { run() })
 		group.AddAction(action)
-		w.app.SetAccelsForAction("win."+entry.name, entry.accels)
+		if len(entry.accels) > 0 {
+			w.app.SetAccelsForAction("win."+entry.name, entry.accels)
+		}
 	}
 	w.win.InsertActionGroup("win", group)
 }
@@ -59,10 +67,12 @@ func (w *window) toggleMuteActiveChat() {
 	w.updateChat(chat.GetJid(), nil, nil, &until)
 }
 
-// escape backs out of whatever is currently in progress: a pending reply, an
-// active search, or the open conversation on narrow layouts.
+// escape backs out of whatever is currently in progress: the find bar, a
+// pending reply, an active search, or the open conversation on narrow layouts.
 func (w *window) escape() {
 	switch {
+	case w.findBar.SearchMode():
+		w.findBar.SetSearchMode(false)
 	case w.pending != nil:
 		w.cancelAttachment()
 	case w.replyTo != nil:

@@ -19,6 +19,9 @@ import (
 
 const appID = "com.zealish.ZChat"
 
+// version is stamped by the Makefile via -ldflags; "dev" marks an ad-hoc build.
+var version = "dev"
+
 //go:embed ui/zchat.gresource
 var gresourceData []byte
 

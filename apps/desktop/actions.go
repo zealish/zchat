@@ -12,7 +12,6 @@ import (
 	"github.com/diamondburned/gotk4/pkg/pango"
 
 	zchatv1 "github.com/zealish/zchat/packages/ipc/zchatv1"
-	"github.com/zealish/zchat/packages/shared/xdgpaths"
 )
 
 // muteForever is the muted_until value the daemon uses for an indefinite mute.
@@ -132,13 +131,14 @@ func isMuted(chat *zchatv1.Chat) bool {
 }
 
 // messageMenuEntries builds the reply/forward/delete actions for a bubble.
-func (w *window) messageMenuEntries(msg *zchatv1.Message) []menuEntry {
+// anchor and the click position are carried through so the reaction chooser can
+// pop up over the same spot as the menu.
+func (w *window) messageMenuEntries(msg *zchatv1.Message, anchor gtk.Widgetter, x, y float64) []menuEntry {
 	id := msg.GetId()
 	entries := []menuEntry{
 		{label: "Reply", run: func() { w.startReply(msg) }},
 		{label: "React 👍", run: func() { w.reactMessage(id, "👍") }},
-		{label: "React ❤️", run: func() { w.reactMessage(id, "❤️") }},
-		{label: "React 😂", run: func() { w.reactMessage(id, "😂") }},
+		{label: "React…", run: func() { w.showReactionChooser(anchor, x, y, id) }},
 		{label: "Copy text", run: func() { w.copyText(msg.GetBody()) }},
 		{label: "Forward", run: func() { w.showForwardDialog(msg) }},
 		{label: "Delete for me", destroy: true, run: func() { w.deleteMessage(id, false) }},
@@ -405,37 +405,6 @@ func (w *window) showChatInfo() {
 		dialog.AddResponse("close", "Close")
 		dialog.Present(w.win)
 	})
-}
-
-// showSettings presents device information, storage locations, and logout.
-func (w *window) showSettings() {
-	jid := w.ownJID
-	if jid == "" {
-		jid = "Not linked"
-	}
-	status := w.connStatus
-	if status == "" {
-		status = "UNKNOWN"
-	}
-	dataDir, _ := xdgpaths.DataDir()
-	cacheDir, _ := xdgpaths.CacheDir()
-	mediaDir, _ := xdgpaths.MediaDir()
-
-	body := fmt.Sprintf(
-		"Device: %s\nConnection: %s\nSocket: %s\n\nData: %s\nCache: %s\nMedia: %s",
-		jid, status, w.sock, dataDir, cacheDir, mediaDir,
-	)
-
-	dialog := adw.NewAlertDialog("Settings", body)
-	dialog.AddResponse("close", "Close")
-	dialog.AddResponse("logout", "Log out")
-	dialog.SetResponseAppearance("logout", adw.ResponseDestructive)
-	dialog.ConnectResponse(func(response string) {
-		if response == "logout" {
-			w.logout()
-		}
-	})
-	dialog.Present(w.win)
 }
 
 func (w *window) logout() {

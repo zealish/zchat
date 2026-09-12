@@ -14,11 +14,14 @@ make build
 The desktop client communicates with the daemon over the Unix socket at
 `/run/user/$UID/zchat.sock`; no TCP port is exposed.
 
+Detailed documentation lives under [`docs/`](docs/): architecture, the gRPC
+contract, build instructions, and packaging.
+
 ## Packaging
 
 ```bash
-make rpm VERSION=0.5.0
-make flatpak VERSION=0.5.0
+make rpm VERSION=0.6.0
+make flatpak VERSION=0.6.0
 ```
 
 Runtime data is stored under `~/.local/share/zchat/`, configuration under
@@ -28,7 +31,13 @@ Runtime data is stored under `~/.local/share/zchat/`, configuration under
 
 Start ZChat, scan the displayed QR code from WhatsApp's Linked devices screen,
 and keep the application running until synchronization completes. The session
-is persisted locally and survives restart. Use Logout to unlink the device.
+is persisted locally and survives restart. Use Log out in the main menu to
+unlink the device.
+
+## Shortcuts
+
+Press `Ctrl+?` for the full list. `Ctrl+K` searches chats, `Ctrl+F` finds text
+inside the open conversation, and `Ctrl+N` starts a new chat.
 
 ## Limitations
 

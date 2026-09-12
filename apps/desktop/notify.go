@@ -7,10 +7,10 @@ import (
 )
 
 // notify raises a desktop notification for an incoming message. Own messages,
-// and messages in the chat the user is already looking at with the window
-// focused, stay silent.
+// messages in the chat the user is already looking at with the window focused,
+// and every message when notifications are switched off, stay silent.
 func (w *window) notify(msg *zchatv1.Message) {
-	if msg.GetOutgoing() {
+	if msg.GetOutgoing() || !w.settings.Notifications {
 		return
 	}
 	if msg.GetChatJid() == w.activeChat && w.win.IsActive() {

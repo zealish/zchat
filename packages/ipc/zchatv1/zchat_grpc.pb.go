@@ -32,6 +32,7 @@ const (
 	ChatService_Logout_FullMethodName             = "/zchat.v1.ChatService/Logout"
 	ChatService_DownloadMedia_FullMethodName      = "/zchat.v1.ChatService/DownloadMedia"
 	ChatService_SearchChats_FullMethodName        = "/zchat.v1.ChatService/SearchChats"
+	ChatService_SearchMessages_FullMethodName     = "/zchat.v1.ChatService/SearchMessages"
 	ChatService_SetPresence_FullMethodName        = "/zchat.v1.ChatService/SetPresence"
 	ChatService_RetryMessage_FullMethodName       = "/zchat.v1.ChatService/RetryMessage"
 	ChatService_RetryMedia_FullMethodName         = "/zchat.v1.ChatService/RetryMedia"
@@ -58,6 +59,7 @@ type ChatServiceClient interface {
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
 	DownloadMedia(ctx context.Context, in *DownloadMediaRequest, opts ...grpc.CallOption) (*DownloadMediaResponse, error)
 	SearchChats(ctx context.Context, in *SearchChatsRequest, opts ...grpc.CallOption) (*SearchChatsResponse, error)
+	SearchMessages(ctx context.Context, in *SearchMessagesRequest, opts ...grpc.CallOption) (*SearchMessagesResponse, error)
 	SetPresence(ctx context.Context, in *SetPresenceRequest, opts ...grpc.CallOption) (*SetPresenceResponse, error)
 	RetryMessage(ctx context.Context, in *RetryMessageRequest, opts ...grpc.CallOption) (*RetryMessageResponse, error)
 	RetryMedia(ctx context.Context, in *RetryMessageRequest, opts ...grpc.CallOption) (*RetryMediaResponse, error)
@@ -205,6 +207,16 @@ func (c *chatServiceClient) SearchChats(ctx context.Context, in *SearchChatsRequ
 	return out, nil
 }
 
+func (c *chatServiceClient) SearchMessages(ctx context.Context, in *SearchMessagesRequest, opts ...grpc.CallOption) (*SearchMessagesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchMessagesResponse)
+	err := c.cc.Invoke(ctx, ChatService_SearchMessages_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatServiceClient) SetPresence(ctx context.Context, in *SetPresenceRequest, opts ...grpc.CallOption) (*SetPresenceResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetPresenceResponse)
@@ -301,6 +313,7 @@ type ChatServiceServer interface {
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
 	DownloadMedia(context.Context, *DownloadMediaRequest) (*DownloadMediaResponse, error)
 	SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error)
+	SearchMessages(context.Context, *SearchMessagesRequest) (*SearchMessagesResponse, error)
 	SetPresence(context.Context, *SetPresenceRequest) (*SetPresenceResponse, error)
 	RetryMessage(context.Context, *RetryMessageRequest) (*RetryMessageResponse, error)
 	RetryMedia(context.Context, *RetryMessageRequest) (*RetryMediaResponse, error)
@@ -356,6 +369,9 @@ func (UnimplementedChatServiceServer) DownloadMedia(context.Context, *DownloadMe
 }
 func (UnimplementedChatServiceServer) SearchChats(context.Context, *SearchChatsRequest) (*SearchChatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SearchChats not implemented")
+}
+func (UnimplementedChatServiceServer) SearchMessages(context.Context, *SearchMessagesRequest) (*SearchMessagesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchMessages not implemented")
 }
 func (UnimplementedChatServiceServer) SetPresence(context.Context, *SetPresenceRequest) (*SetPresenceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetPresence not implemented")
@@ -633,6 +649,24 @@ func _ChatService_SearchChats_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatService_SearchMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).SearchMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatService_SearchMessages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).SearchMessages(ctx, req.(*SearchMessagesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatService_SetPresence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetPresenceRequest)
 	if err := dec(in); err != nil {
@@ -810,6 +844,10 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SearchChats",
 			Handler:    _ChatService_SearchChats_Handler,
+		},
+		{
+			MethodName: "SearchMessages",
+			Handler:    _ChatService_SearchMessages_Handler,
 		},
 		{
 			MethodName: "SetPresence",

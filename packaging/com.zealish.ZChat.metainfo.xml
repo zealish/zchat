@@ -31,6 +31,11 @@
   </content_rating>
 
   <releases>
+    <release version="0.6.0" date="2026-09-12">
+      <description>
+        <p>Emoji picker, find in conversation, and a preferences dialog with theme selection.</p>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-09-11">
       <description>
         <p>Typing indicators, contact presence, and animated WebP stickers.</p>

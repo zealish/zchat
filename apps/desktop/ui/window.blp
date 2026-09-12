@@ -48,9 +48,11 @@ Adw.ApplicationWindow window {
                   }
 
                   [end]
-                  Gtk.Button settings_button {
-                    icon-name: "emblem-system-symbolic";
-                    tooltip-text: "Settings";
+                  Gtk.MenuButton primary_menu_button {
+                    icon-name: "open-menu-symbolic";
+                    tooltip-text: "Main menu";
+                    primary: true;
+                    menu-model: primary_menu;
                   }
                 }
               [top]
@@ -118,6 +120,39 @@ Adw.ApplicationWindow window {
                   icon-name: "dialog-information-symbolic";
                   tooltip-text: "Chat information";
                 }
+              }
+
+              [top]
+              // No key-capture-widget: typing anywhere would otherwise be
+              // swallowed by the find entry instead of the composer.
+              Gtk.SearchBar find_bar {
+                child: Gtk.Box {
+                  orientation: horizontal;
+                  spacing: 6;
+
+                  Gtk.SearchEntry find_entry {
+                    hexpand: true;
+                    placeholder-text: "Find in conversation";
+                  }
+
+                  Gtk.Label find_status {
+                    styles ["dim-label"]
+                  }
+
+                  Gtk.Button find_prev {
+                    icon-name: "go-up-symbolic";
+                    tooltip-text: "Previous match";
+                    sensitive: false;
+                    styles ["flat"]
+                  }
+
+                  Gtk.Button find_next {
+                    icon-name: "go-down-symbolic";
+                    tooltip-text: "Next match";
+                    sensitive: false;
+                    styles ["flat"]
+                  }
+                };
               }
 
               content: Gtk.ScrolledWindow message_scroll {
@@ -227,6 +262,14 @@ Adw.ApplicationWindow window {
                     styles ["flat", "circular"]
                   }
 
+                  Gtk.MenuButton emoji_button {
+                    icon-name: "face-smile-symbolic";
+                    tooltip-text: "Insert emoji";
+                    valign: center;
+                    always-show-arrow: false;
+                    styles ["flat", "circular"]
+                  }
+
                   Gtk.Entry message_entry {
                     hexpand: true;
                     placeholder-text: "Write a message";
@@ -245,4 +288,23 @@ Adw.ApplicationWindow window {
       }
     };
   };
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: "Preferences";
+      action: "win.preferences";
+    }
+
+    item {
+      label: "Keyboard Shortcuts";
+      action: "win.shortcuts";
+    }
+
+    item {
+      label: "About ZChat";
+      action: "win.about";
+    }
+  }
 }

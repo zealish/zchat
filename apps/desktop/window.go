@@ -52,9 +52,9 @@ type window struct {
 	searchEntry    *gtk.SearchEntry
 	sendButton     *gtk.Button
 	attachButton   *gtk.Button
+	emojiButton    *gtk.MenuButton
 	newChatButton  *gtk.Button
 	chatInfoButton *gtk.Button
-	settingsButton *gtk.Button
 	newChatDialog  *adw.Dialog
 	connected      bool
 	ownJID         string
@@ -63,6 +63,14 @@ type window struct {
 	replySender    *gtk.Label
 	replyBody      *gtk.Label
 	replyCancel    *gtk.Button
+	findBar        *gtk.SearchBar
+	findEntry      *gtk.SearchEntry
+	findStatus     *gtk.Label
+	findPrev       *gtk.Button
+	findNext       *gtk.Button
+	findMatches    []string
+	findIndex      int
+	findCurrent    string
 
 	attachmentBar    *gtk.Box
 	attachmentThumb  *gtk.Picture
@@ -100,6 +108,7 @@ type window struct {
 	activeGroup bool
 	replyTo     *zchatv1.Message
 	pending     *attachment
+	settings    settings
 }
 
 // chatFilter selects which slice of the chat list the sidebar shows.
@@ -135,14 +144,20 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		searchEntry:    builder.GetObject("search_entry").Cast().(*gtk.SearchEntry),
 		sendButton:     builder.GetObject("send_button").Cast().(*gtk.Button),
 		attachButton:   builder.GetObject("attach_button").Cast().(*gtk.Button),
+		emojiButton:    builder.GetObject("emoji_button").Cast().(*gtk.MenuButton),
 		newChatButton:  builder.GetObject("new_chat_button").Cast().(*gtk.Button),
 		chatInfoButton: builder.GetObject("chat_info_button").Cast().(*gtk.Button),
-		settingsButton: builder.GetObject("settings_button").Cast().(*gtk.Button),
 
 		replyBar:    builder.GetObject("reply_bar").Cast().(*gtk.Box),
 		replySender: builder.GetObject("reply_sender").Cast().(*gtk.Label),
 		replyBody:   builder.GetObject("reply_body").Cast().(*gtk.Label),
 		replyCancel: builder.GetObject("reply_cancel").Cast().(*gtk.Button),
+
+		findBar:    builder.GetObject("find_bar").Cast().(*gtk.SearchBar),
+		findEntry:  builder.GetObject("find_entry").Cast().(*gtk.SearchEntry),
+		findStatus: builder.GetObject("find_status").Cast().(*gtk.Label),
+		findPrev:   builder.GetObject("find_prev").Cast().(*gtk.Button),
+		findNext:   builder.GetObject("find_next").Cast().(*gtk.Button),
 
 		attachmentBar:    builder.GetObject("attachment_bar").Cast().(*gtk.Box),
 		attachmentThumb:  builder.GetObject("attachment_thumb").Cast().(*gtk.Picture),
@@ -162,16 +177,18 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		animTimers:    make(map[*gtk.Picture]glib.SourceHandle),
 		avatars:       make(map[string]*gdk.Texture),
 		avatarRows:    make(map[*adw.Avatar]string),
+		settings:      loadSettings(),
 	}
 
 	w.win.SetApplication(&app.Application)
+	w.applyTheme()
 	w.setupChatList()
 	w.newChatButton.ConnectClicked(func() { w.showNewChatDialog() })
 	w.chatInfoButton.ConnectClicked(func() { w.showChatInfo() })
-	w.settingsButton.ConnectClicked(func() { w.showSettings() })
 	w.setupMessageList()
 	w.setupComposer()
 	w.setupSearch()
+	w.setupFind()
 	w.setupShortcuts()
 	w.setupDragAndDrop()
 	w.setupPasteShortcut()
@@ -632,6 +649,7 @@ func (w *window) openChat(chat *zchatv1.Chat) {
 	w.activeChat = chat.GetJid()
 	w.setComposerEnabled(true)
 	w.activeGroup = chat.GetIsGroup()
+	w.findBar.SetSearchMode(false)
 	w.cancelAttachment()
 	w.contentPage.SetTitle(displayName(chat))
 	w.contentTitle.SetTitle(displayName(chat))
@@ -876,7 +894,7 @@ func (w *window) setupMessageList() {
 			if msg == nil {
 				return
 			}
-			showMenu(bubble, x, y, w.messageMenuEntries(msg))
+			showMenu(bubble, x, y, w.messageMenuEntries(msg, bubble, x, y))
 		})
 		outer.Append(bubble)
 		item.SetChild(outer)
@@ -924,6 +942,8 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 	reaction := meta.NextSibling().(*gtk.Label)
 	reaction.SetText(msg.GetReaction())
 	reaction.SetVisible(msg.GetReaction() != "")
+	// Rows are recycled, so the find highlight is reapplied on every bind.
+	highlightRow(item, w.findCurrent != "" && msg.GetId() == w.findCurrent)
 
 	w.bindMedia(media, msg)
 
@@ -1090,6 +1110,7 @@ func (w *window) setComposerEnabled(enabled bool) {
 	w.messageEntry.SetSensitive(enabled)
 	w.sendButton.SetSensitive(enabled)
 	w.attachButton.SetSensitive(enabled)
+	w.emojiButton.SetSensitive(enabled)
 }
 
 func (w *window) setupComposer() {
@@ -1119,6 +1140,7 @@ func (w *window) setupComposer() {
 	w.messageEntry.ConnectActivate(send)
 	w.replyCancel.ConnectClicked(w.cancelReply)
 	w.attachmentCancel.ConnectClicked(w.cancelAttachment)
+	w.setupEmojiChooser()
 	w.setComposerEnabled(false)
 }
 

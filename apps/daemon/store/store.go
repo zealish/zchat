@@ -690,6 +690,31 @@ LIMIT ?`, pattern, pattern, limit)
 	return chats, rows.Err()
 }
 
+// SearchMessages returns messages whose body matches query, newest first.
+// chatJID scopes the search to one conversation; empty searches every chat.
+func (s *Store) SearchMessages(ctx context.Context, query, chatJID string, limit int) ([]Message, error) {
+	pattern := "%" + escapeLike(query) + "%"
+	rows, err := s.db.QueryContext(ctx, messageColumns+`
+WHERE (? = '' OR m.chat_jid = ?)
+  AND COALESCE(m.body, '') LIKE ? ESCAPE '\'
+ORDER BY m.timestamp DESC
+LIMIT ?`, chatJID, chatJID, pattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search messages: %w", err)
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
 func escapeLike(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(s)

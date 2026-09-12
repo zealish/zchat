@@ -4,10 +4,12 @@ UI_DIR := apps/desktop/ui
 BUILD_DIR := build
 DIST_DIR := dist
 APP_ID := com.zealish.ZChat
-VERSION ?= 0.5.0
+VERSION ?= 0.6.0
 GO_LDFLAGS ?=
 FLATPAK_BUILDER ?= flatpak-builder
-GO_BUILD_FLAGS := $(if $(GO_LDFLAGS),-ldflags '$(GO_LDFLAGS)',)
+# main.version is stamped into both binaries so the About dialog and --version
+# report the packaged release rather than a hardcoded constant.
+GO_BUILD_FLAGS := -ldflags '-X main.version=$(VERSION) $(GO_LDFLAGS)'
 
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2

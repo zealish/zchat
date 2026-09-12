@@ -97,6 +97,35 @@ func (s *Service) SearchChats(ctx context.Context, req *zchatv1.SearchChatsReque
 	return resp, nil
 }
 
+// SearchMessages returns messages whose body matches a free-text query,
+// optionally scoped to a single chat.
+func (s *Service) SearchMessages(ctx context.Context, req *zchatv1.SearchMessagesRequest) (*zchatv1.SearchMessagesResponse, error) {
+	query := strings.TrimSpace(req.GetQuery())
+	if query == "" {
+		return &zchatv1.SearchMessagesResponse{}, nil
+	}
+
+	limit := int(req.GetLimit())
+	if limit <= 0 || limit > maxPageSize {
+		limit = maxPageSize
+	}
+
+	msgs, err := s.store.SearchMessages(ctx, query, req.GetChatJid(), limit)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	resp := &zchatv1.SearchMessagesResponse{Messages: make([]*zchatv1.Message, 0, len(msgs))}
+	for _, m := range msgs {
+		out := wa.ToProtoMessage(m)
+		if out.GetSenderName() == "" && !out.GetOutgoing() {
+			out.SenderName = s.session.DisplayName(ctx, out.GetSender())
+		}
+		resp.Messages = append(resp.Messages, out)
+	}
+	return resp, nil
+}
+
 // DownloadMedia fetches a message's attachment to the local media directory.
 func (s *Service) DownloadMedia(ctx context.Context, req *zchatv1.DownloadMediaRequest) (*zchatv1.DownloadMediaResponse, error) {
 	id := req.GetMessageId()

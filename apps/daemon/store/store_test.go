@@ -159,3 +159,46 @@ func TestRecentIncomingSkipsOwnMessages(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchMessages(t *testing.T) {
+	s, ctx := newTestStore(t)
+
+	for _, m := range []Message{
+		{ID: "m1", ChatJID: "a@s.whatsapp.net", Body: "lunch tomorrow", Timestamp: 10},
+		{ID: "m2", ChatJID: "a@s.whatsapp.net", Body: "Lunch is ready", Timestamp: 20},
+		{ID: "m3", ChatJID: "a@s.whatsapp.net", Body: "dinner later", Timestamp: 30},
+		{ID: "m4", ChatJID: "b@s.whatsapp.net", Body: "lunch elsewhere", Timestamp: 40},
+		{ID: "m5", ChatJID: "a@s.whatsapp.net", Body: "100% sure", Timestamp: 50},
+	} {
+		if err := s.InsertMessage(ctx, m); err != nil {
+			t.Fatalf("insert %s: %v", m.ID, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		query   string
+		chatJID string
+		want    []string
+	}{
+		{"scoped to chat, newest first", "lunch", "a@s.whatsapp.net", []string{"m2", "m1"}},
+		{"every chat", "lunch", "", []string{"m4", "m2", "m1"}},
+		{"no match", "breakfast", "", nil},
+		{"wildcard stays literal", "100%", "", []string{"m5"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs, err := s.SearchMessages(ctx, tc.query, tc.chatJID, 10)
+			if err != nil {
+				t.Fatalf("search: %v", err)
+			}
+			if len(msgs) != len(tc.want) {
+				t.Fatalf("want %v, got %d messages", tc.want, len(msgs))
+			}
+			for i, id := range tc.want {
+				if msgs[i].ID != id {
+					t.Errorf("position %d: want %s, got %s", i, id, msgs[i].ID)
+				}
+			}
+		})
+	}
+}
