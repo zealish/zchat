@@ -7,6 +7,13 @@ import (
 	zchatv1 "github.com/zealish/zchat/packages/ipc/zchatv1"
 )
 
+// avatarBinding is a widget currently showing a JID's picture, held by native
+// pointer so a recycled row resolves to the same entry however it is reached.
+type avatarBinding struct {
+	avatar *adw.Avatar
+	jid    string
+}
+
 // bindAvatar shows a contact's profile picture on an Avatar widget, asking the
 // daemon for it the first time that JID is seen. The widget keeps its fallback
 // initials until the image arrives.
@@ -15,7 +22,7 @@ import (
 // rebuilding the list: the ListView recycles rows, so a bound widget may end up
 // showing a different chat before the answer comes back.
 func (w *window) bindAvatar(avatar *adw.Avatar, jid string) {
-	w.avatarRows[avatar] = jid
+	w.avatarRows[widgetKey(avatar)] = avatarBinding{avatar: avatar, jid: jid}
 
 	texture, resolved := w.avatars[jid]
 	setAvatarImage(avatar, texture)
@@ -36,7 +43,7 @@ func (w *window) bindAvatar(avatar *adw.Avatar, jid string) {
 
 // unbindAvatar forgets a recycled row's widget.
 func (w *window) unbindAvatar(avatar *adw.Avatar) {
-	delete(w.avatarRows, avatar)
+	delete(w.avatarRows, widgetKey(avatar))
 }
 
 // setAvatar caches a resolved picture and applies it to every widget currently
@@ -53,9 +60,9 @@ func (w *window) setAvatar(jid, path string) {
 	}
 	w.avatars[jid] = texture
 
-	for avatar, boundJID := range w.avatarRows {
-		if boundJID == jid {
-			setAvatarImage(avatar, texture)
+	for _, bound := range w.avatarRows {
+		if bound.jid == jid {
+			setAvatarImage(bound.avatar, texture)
 		}
 	}
 }

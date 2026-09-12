@@ -49,6 +49,41 @@ type animation struct {
 
 func (a *animation) animated() bool { return len(a.frames) > 1 }
 
+// animCacheLimit caps how many decoded images are kept. A still is up to
+// 512x512 RGBA (~1MB) and an animated sticker holds every frame at once, so an
+// unbounded cache grows without limit over a long session. Scrolling only ever
+// works over a small window of rows, so a modest cap keeps the hit rate while
+// bounding the memory.
+const animCacheLimit = 48
+
+// touchAnimCache records a use and evicts the least recently used entries once
+// the cache is over its limit.
+func (w *window) touchAnimCache(path string) {
+	w.animOrder = append(w.animOrder, path)
+	if len(w.animOrder) < animCacheLimit*2 {
+		return
+	}
+	// Compact to the most recent use of each path, newest last.
+	seen := make(map[string]bool, len(w.animCache))
+	compacted := make([]string, 0, len(w.animCache))
+	for i := len(w.animOrder) - 1; i >= 0; i-- {
+		p := w.animOrder[i]
+		if seen[p] || w.animCache[p] == nil {
+			continue
+		}
+		seen[p] = true
+		compacted = append(compacted, p)
+	}
+	for i, j := 0, len(compacted)-1; i < j; i, j = i+1, j-1 {
+		compacted[i], compacted[j] = compacted[j], compacted[i]
+	}
+	for len(compacted) > animCacheLimit {
+		delete(w.animCache, compacted[0])
+		compacted = compacted[1:]
+	}
+	w.animOrder = compacted
+}
+
 // loadAnimation resolves a decoded image and hands it to done, with nil when
 // the file could not be read.
 //
@@ -62,6 +97,7 @@ func (a *animation) animated() bool { return len(a.frames) > 1 }
 // scrolling, and concurrent requests for the same path share one decode.
 func (w *window) loadAnimation(path string, done func(*animation)) {
 	if cached, ok := w.animCache[path]; ok {
+		w.touchAnimCache(path)
 		done(cached)
 		return
 	}
@@ -83,6 +119,7 @@ func (w *window) loadAnimation(path string, done func(*animation)) {
 			} else {
 				anim = raw.toAnimation()
 				w.animCache[path] = anim
+				w.touchAnimCache(path)
 			}
 			for _, waiter := range waiters {
 				waiter(anim)
@@ -112,29 +149,31 @@ func (w *window) showAnimation(preview *gtk.Picture, anim *animation) {
 		return
 	}
 
+	key := widgetKey(preview)
 	frame := 0
 	var tick func() bool
 	tick = func() bool {
 		// The row may have been recycled onto another message since the last
 		// frame, which stopAnimation records by dropping the entry.
-		if w.animTimers[preview] == 0 {
+		if w.animTimers[key] == 0 {
 			return false
 		}
 		frame = (frame + 1) % len(anim.frames)
 		preview.SetPixbuf(anim.frames[frame])
-		w.animTimers[preview] = glib.TimeoutAdd(uint(anim.delays[frame]), tick)
+		w.animTimers[key] = glib.TimeoutAdd(uint(anim.delays[frame]), tick)
 		return false
 	}
-	w.animTimers[preview] = glib.TimeoutAdd(uint(anim.delays[0]), tick)
+	w.animTimers[key] = glib.TimeoutAdd(uint(anim.delays[0]), tick)
 }
 
 // stopAnimation halts the frame timer attached to a Picture, if any.
 func (w *window) stopAnimation(preview *gtk.Picture) {
-	if handle, ok := w.animTimers[preview]; ok {
+	key := widgetKey(preview)
+	if handle, ok := w.animTimers[key]; ok {
 		if handle != 0 {
 			glib.SourceRemove(handle)
 		}
-		delete(w.animTimers, preview)
+		delete(w.animTimers, key)
 	}
 }
 

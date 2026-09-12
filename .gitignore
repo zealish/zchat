@@ -1,5 +1,8 @@
 /build/
 /dist/
+/zchat
+/zchat-daemon
+/desktop
 *.gresource
 apps/desktop/ui/*.ui
 /PRD.md

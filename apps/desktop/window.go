@@ -101,7 +101,8 @@ type window struct {
 	chatRebuildQueued bool
 	searchQuery       string
 	searchResults     []*zchatv1.Chat
-	mediaHandlers     map[*gtk.Button]coreglib.SignalHandle
+	mediaHandlers     map[uintptr]coreglib.SignalHandle
+	mediaCells        map[uintptr]*mediaCell
 	filter            chatFilter
 	stickToBottom     bool
 	bottomQueued      bool
@@ -113,10 +114,15 @@ type window struct {
 	idleTimer         glib.SourceHandle
 	animCache         map[string]*animation
 	animPending       map[string][]func(*animation)
-	animTimers        map[*gtk.Picture]glib.SourceHandle
-	previewPaths      map[*gtk.Picture]string
+	animOrder         []string
+	animTimers        map[uintptr]glib.SourceHandle
+	previewPaths      map[uintptr]string
+	thumbCache        map[[32]byte]*gdk.Texture
 	avatars           map[string]*gdk.Texture
-	avatarRows        map[*adw.Avatar]string
+	spacerWidths      map[string]int
+	spacerSampled     int
+	spacerSerial      uint
+	avatarRows        map[uintptr]avatarBinding
 
 	client      *client.Client
 	activeChat  string
@@ -190,15 +196,18 @@ func newWindow(ctx context.Context, app *adw.Application, log zerolog.Logger, so
 		chatIndex:     make(map[string]*zchatv1.Chat),
 		chatRows:      make(map[string]*gtk.ListItem),
 		messageRows:   make(map[string]*gtk.ListItem),
-		mediaHandlers: make(map[*gtk.Button]coreglib.SignalHandle),
+		mediaHandlers: make(map[uintptr]coreglib.SignalHandle),
+		mediaCells:    make(map[uintptr]*mediaCell),
 		presence:      make(map[string]*chatPresence),
 		typingTimers:  make(map[string]glib.SourceHandle),
 		animCache:     make(map[string]*animation),
 		animPending:   make(map[string][]func(*animation)),
-		animTimers:    make(map[*gtk.Picture]glib.SourceHandle),
-		previewPaths:  make(map[*gtk.Picture]string),
+		animTimers:    make(map[uintptr]glib.SourceHandle),
+		previewPaths:  make(map[uintptr]string),
+		avatarRows:    make(map[uintptr]avatarBinding),
+		thumbCache:    make(map[[32]byte]*gdk.Texture),
+		spacerWidths:  make(map[string]int),
 		avatars:       make(map[string]*gdk.Texture),
-		avatarRows:    make(map[*adw.Avatar]string),
 		settings:      loadSettings(),
 	}
 
@@ -782,7 +791,7 @@ func (w *window) setupChatList() {
 	factory.ConnectUnbind(func(obj *coreglib.Object) {
 		item := obj.Cast().(*gtk.ListItem)
 		chat := chatModelType.ObjectValue(item.Item())
-		if w.chatRows[chat.GetJid()] == item {
+		if row, ok := w.chatRows[chat.GetJid()]; ok && row.Eq(item) {
 			delete(w.chatRows, chat.GetJid())
 		}
 		row := item.Child().(*gtk.Box)
@@ -881,16 +890,27 @@ func (w *window) openChat(chat *zchatv1.Chat) {
 	})
 }
 
+// findMessage locates a message in the open chat's model by id.
+//
+// Model.At crosses into C and allocates a wrapper per element, so a forward
+// scan of a long chat is expensive. Status updates, reactions and deletes
+// nearly always target a recent message, so this walks from the newest end and
+// usually stops within a few steps.
+func (w *window) findMessage(id string) (int, *zchatv1.Message) {
+	for i := w.messages.Len() - 1; i >= 0; i-- {
+		if msg := w.messages.At(i); msg.GetId() == id {
+			return i, msg
+		}
+	}
+	return -1, nil
+}
+
 func (w *window) onMessage(msg *zchatv1.Message, isUpdate bool) {
 	if msg.GetChatJid() != w.activeChat {
 		return
 	}
 
-	for i := range w.messages.Len() {
-		existing := w.messages.At(i)
-		if existing.GetId() != msg.GetId() {
-			continue
-		}
+	if _, existing := w.findMessage(msg.GetId()); existing != nil {
 		// Splicing the model would destroy and recreate the row widget, which
 		// flickers and drops the ListView's scroll anchor. Sent-status updates
 		// only change a few fields, so the bound row is refreshed directly.
@@ -920,14 +940,12 @@ func (w *window) onMessageDeleted(evt *zchatv1.MessageDeleted) {
 	if evt.GetChatJid() != w.activeChat {
 		return
 	}
-	for i := range w.messages.Len() {
-		if w.messages.At(i).GetId() != evt.GetId() {
-			continue
-		}
-		w.messages.Splice(i, 1)
-		delete(w.messageRows, evt.GetId())
+	i, found := w.findMessage(evt.GetId())
+	if found == nil {
 		return
 	}
+	w.messages.Splice(i, 1)
+	delete(w.messageRows, evt.GetId())
 }
 
 func (w *window) nearBottom() bool {
@@ -1077,14 +1095,7 @@ func (w *window) setupMessageList() {
 
 		media := gtk.NewBox(gtk.OrientationVertical, 4)
 		media.SetVisible(false)
-		preview := gtk.NewPicture()
-		preview.SetSizeRequest(240, 180)
-		preview.SetContentFit(gtk.ContentFitCover)
-		preview.AddCSSClass("zchat-media")
-		media.Append(preview)
-		action := gtk.NewButtonWithLabel("")
-		action.SetHAlign(gtk.AlignStart)
-		media.Append(action)
+		w.newMediaCell(media)
 		bubble.Append(media)
 
 		// WhatsApp tucks the timestamp into the body's last line when it
@@ -1135,14 +1146,15 @@ func (w *window) setupMessageList() {
 	factory.ConnectUnbind(func(obj *coreglib.Object) {
 		item := obj.Cast().(*gtk.ListItem)
 		msg := messageModelType.ObjectValue(item.Item())
-		if w.messageRows[msg.GetId()] == item {
+		if row, ok := w.messageRows[msg.GetId()]; ok && row.Eq(item) {
 			delete(w.messageRows, msg.GetId())
 		}
 		// A row scrolled out of view must not keep ticking its animation, and
 		// an in-flight decode for it is no longer wanted.
-		preview := mediaPreviewOf(item)
-		w.stopAnimation(preview)
-		delete(w.previewPaths, preview)
+		if cell, ok := w.mediaCells[widgetKey(mediaBoxOf(item))]; ok {
+			w.stopAnimation(cell.preview)
+			delete(w.previewPaths, widgetKey(cell.preview))
+		}
 	})
 	w.messageList.SetFactory(&factory.ListItemFactory)
 }
@@ -1165,10 +1177,6 @@ func mediaBoxOf(item *gtk.ListItem) *gtk.Box {
 	sender := bubble.FirstChild().(*gtk.Label)
 	forwarded := sender.NextSibling().(*gtk.Label)
 	return forwarded.NextSibling().(*gtk.Box).NextSibling().(*gtk.Box)
-}
-
-func mediaPreviewOf(item *gtk.ListItem) *gtk.Picture {
-	return mediaBoxOf(item).FirstChild().(*gtk.Picture)
 }
 
 func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
@@ -1236,7 +1244,7 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 
 	// The body is padded only once the timestamp's final width is known, so
 	// this has to follow meta.SetText above.
-	setBodyText(body, meta, msg.GetBody())
+	w.setBodyText(body, meta, msg.GetBody())
 }
 
 // setBodyText fills a bubble's body and reserves room on its last line for the
@@ -1244,24 +1252,44 @@ func (w *window) bindMessageRow(item *gtk.ListItem, msg *zchatv1.Message) {
 //
 // A media-only message has no body to pad. Only the body label is hidden then,
 // never the overlay, so the timestamp still renders under the attachment.
-func setBodyText(body, meta *gtk.Label, text string) {
+func (w *window) setBodyText(body, meta *gtk.Label, text string) {
 	body.SetVisible(text != "")
 	if text == "" {
 		return
 	}
-	body.SetText(text + timestampSpacer(body, meta))
+	body.SetText(text + w.timestampSpacer(body, meta))
 }
 
 // timestampSpacer returns non-breaking spaces wide enough to clear the
 // timestamp. Pango measures both labels in their own font, so the reservation
 // tracks the theme's font size rather than assuming a fixed width.
-func timestampSpacer(body, meta *gtk.Label) string {
+//
+// Laying text out costs around 80us per call, which the ListView pays on every
+// row it binds while scrolling, so the two measurements are cached. The label's
+// PangoContext bumps its serial whenever the font or theme changes, which is
+// exactly when a cached width stops being valid, so it keys the cache.
+func (w *window) timestampSpacer(body, meta *gtk.Label) string {
 	// spacerSample is averaged over several spaces to smooth off the
 	// sub-pixel advance width of a single one.
 	const spacerSample = 20
-	needed, _ := meta.CreatePangoLayout(meta.Text()).PixelSize()
-	sampled, _ := body.CreatePangoLayout(strings.Repeat("\u00a0", spacerSample)).PixelSize()
-	return spacerRun(needed, sampled, spacerSample)
+
+	serial := body.PangoContext().Serial()
+	if serial != w.spacerSerial {
+		w.spacerSerial = serial
+		w.spacerSampled = 0
+		clear(w.spacerWidths)
+	}
+
+	stamp := meta.Text()
+	needed, ok := w.spacerWidths[stamp]
+	if !ok {
+		needed, _ = meta.CreatePangoLayout(stamp).PixelSize()
+		w.spacerWidths[stamp] = needed
+	}
+	if w.spacerSampled == 0 {
+		w.spacerSampled, _ = body.CreatePangoLayout(strings.Repeat("\u00a0", spacerSample)).PixelSize()
+	}
+	return spacerRun(needed, w.spacerSampled, spacerSample)
 }
 
 // spacerRun sizes the run of non-breaking spaces that reserves needed pixels,
@@ -1277,136 +1305,14 @@ func spacerRun(needed, sampled, sample int) string {
 	return "\u200b" + strings.Repeat("\u00a0", count)
 }
 
-// bindMedia renders a message's attachment: the WhatsApp thumbnail (or the
-// downloaded file itself) plus a button that downloads on demand and opens the
-// result with the desktop's default handler.
-func (w *window) bindMedia(media *gtk.Box, msg *zchatv1.Message) {
-	info := msg.GetMedia()
-	preview := media.FirstChild().(*gtk.Picture)
-	action := preview.NextSibling().(*gtk.Button)
-
-	// Rows are recycled, so the previous message's click handler and running
-	// animation must go.
-	if handle, ok := w.mediaHandlers[action]; ok {
-		action.HandlerDisconnect(handle)
-		delete(w.mediaHandlers, action)
-	}
-	w.stopAnimation(preview)
-
-	if info == nil {
-		media.SetVisible(false)
-		return
-	}
-	media.SetVisible(true)
-
-	local := info.GetPath()
-	switch {
-	case local != "" && isVisualMedia(msg.GetType()):
-		// Decoding is asynchronous, so the row may already show another
-		// message by the time it lands. The path the preview was last bound
-		// to says whether the result is still wanted.
-		w.previewPaths[preview] = local
-		if thumb := info.GetThumbnail(); len(thumb) > 0 {
-			w.showThumbnail(preview, thumb)
-		}
-		w.loadAnimation(local, func(anim *animation) {
-			if anim == nil || w.previewPaths[preview] != local {
-				return
-			}
-			w.stopAnimation(preview)
-			w.showAnimation(preview, anim)
-			preview.SetVisible(true)
-		})
-	case len(info.GetThumbnail()) > 0:
-		delete(w.previewPaths, preview)
-		w.showThumbnail(preview, info.GetThumbnail())
-	default:
-		delete(w.previewPaths, preview)
-		preview.SetVisible(false)
-	}
-
-	id := msg.GetId()
-	if local != "" {
-		action.SetLabel("Open")
-		w.mediaHandlers[action] = action.ConnectClicked(func() { w.openFile(local) })
-		return
-	}
-
-	action.SetLabel(downloadLabel(msg.GetType(), info.GetSize()))
-	w.mediaHandlers[action] = action.ConnectClicked(func() {
-		action.SetSensitive(false)
-		action.SetLabel("Downloading…")
-		w.client.DownloadMedia(w.ctx, id, func(updated *zchatv1.Message, err error) {
-			action.SetSensitive(true)
-			if err != nil {
-				w.log.Error().Err(err).Str("id", id).Msg("download media")
-				w.toast("Download failed")
-				action.SetLabel("Retry download")
-				return
-			}
-			w.onMessage(updated, true)
-		})
-	})
-}
-
 func (w *window) openFile(path string) {
 	launcher := gtk.NewFileLauncher(gio.NewFileForPath(path))
 	launcher.Launch(w.ctx, &w.win.Window, nil)
 }
 
-// showThumbnail paints the small inline preview WhatsApp ships with a message.
-// It stands in until the full image finishes decoding, so an attachment never
-// pops in from an empty box.
-func (w *window) showThumbnail(preview *gtk.Picture, thumbnail []byte) {
-	pixbuf, err := pixbufFromBytes(w.ctx, thumbnail)
-	if err != nil {
-		preview.SetVisible(false)
-		return
-	}
-	preview.SetPixbuf(pixbuf)
-	preview.SetVisible(true)
-}
-
-func isVisualMedia(kind string) bool {
-	return kind == "image" || kind == "sticker"
-}
-
 func pixbufFromBytes(ctx context.Context, data []byte) (*gdkpixbuf.Pixbuf, error) {
 	stream := gio.NewMemoryInputStreamFromBytes(glib.NewBytes(data))
 	return gdkpixbuf.NewPixbufFromStream(ctx, stream)
-}
-
-func downloadLabel(kind string, size int64) string {
-	noun := "file"
-	switch kind {
-	case "image":
-		noun = "photo"
-	case "video":
-		noun = "video"
-	case "audio":
-		noun = "audio"
-	case "sticker":
-		noun = "sticker"
-	case "document":
-		noun = "document"
-	}
-	if size <= 0 {
-		return "Download " + noun
-	}
-	return fmt.Sprintf("Download %s (%s)", noun, humanSize(size))
-}
-
-func humanSize(size int64) string {
-	const unit = 1024
-	if size < unit {
-		return fmt.Sprintf("%d B", size)
-	}
-	div, exp := int64(unit), 0
-	for n := size / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGT"[exp])
 }
 
 func (w *window) setComposerEnabled(enabled bool) {

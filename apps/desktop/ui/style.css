@@ -57,8 +57,71 @@
   font-size: 0.8em;
 }
 
+/* WhatsApp rounds an inline attachment and insets it slightly from the bubble's
+ * padding, so the thumbnail reads as a tile rather than a full-bleed image. */
 .zchat-media {
   border-radius: 6px;
+}
+
+/* Shown while an attachment has no pixels yet, so the overlaid download button
+ * sits on a surface instead of floating in the bubble. */
+.zchat-media-empty {
+  background-color: alpha(black, 0.22);
+}
+
+/* The download/play control WhatsApp centres on an undownloaded thumbnail: a
+ * translucent dark disc that brightens on hover. */
+.zchat-media-action {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 9999px;
+  border: none;
+  box-shadow: none;
+  color: #ffffff;
+  background-color: alpha(black, 0.55);
+}
+
+.zchat-media-action:hover {
+  background-color: alpha(black, 0.7);
+}
+
+.zchat-media-action:active {
+  background-color: alpha(black, 0.8);
+}
+
+.zchat-media-action:disabled {
+  color: alpha(#ffffff, 0.7);
+  background-color: alpha(black, 0.45);
+}
+
+/* Size or clip length, pinned to the thumbnail's bottom-right corner the way
+ * WhatsApp labels one. */
+.zchat-media-badge {
+  margin: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.72em;
+  color: #ffffff;
+  background-color: alpha(black, 0.5);
+}
+
+/* Documents and audio: a named row rather than a thumbnail. */
+.zchat-media-file {
+  border-radius: 6px;
+  background-color: alpha(black, 0.12);
+  padding: 6px 8px;
+}
+
+/* The in-app photo and video viewer. WhatsApp backs its viewer with near-black
+ * so the media itself carries the contrast. */
+.zchat-viewer {
+  background-color: #0b0f12;
+}
+
+.zchat-viewer-caption {
+  color: #ffffff;
+  padding: 10px 16px;
 }
 
 .zchat-reply-bar {
