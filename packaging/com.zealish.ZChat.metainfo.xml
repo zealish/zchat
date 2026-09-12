@@ -31,6 +31,11 @@
   </content_rating>
 
   <releases>
+    <release version="0.8.0" date="2026-09-12">
+      <description>
+        <p>Photos and videos open in an in-app viewer with the download control overlaid on the thumbnail, attachments render reliably again, and scrolling a chat with media no longer stutters.</p>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-09-12">
       <description>
         <p>Chats open on a single click, the chat list no longer jumps back to the top when one is opened, and media decoding no longer freezes the window.</p>

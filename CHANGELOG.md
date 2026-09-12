@@ -5,7 +5,7 @@ All notable changes to ZChat are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-09-12
 
 ### Added
 
@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to a bare download button.
 - Documents and audio render as a named row with an icon, filename and size,
   matching how WhatsApp lists a file.
+- Chat-list and message queries run against a read-only connection pool, so
+  they no longer queue behind the single writer that history sync keeps busy
+  for minutes at a time. The message and chat indexes are composite ones
+  matching how those queries order, replacing single-column indexes that only
+  amplified writes.
+- Contact names are cached rather than resolved from the database per message,
+  and invalidated when WhatsApp reports a contact, push name or business name
+  change.
 
 ### Fixed
 

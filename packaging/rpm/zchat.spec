@@ -15,7 +15,7 @@
 %global _binary_payload w3.zstdio
 
 Name:           zchat
-Version:        %{?_zchat_version}%{!?_zchat_version:0.7.1}
+Version:        %{?_zchat_version}%{!?_zchat_version:0.8.0}
 Release:        1%{?dist}
 Summary:        Native Linux desktop client for WhatsApp Multi-Device
 
@@ -80,6 +80,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Sat Sep 12 2026 Zealish <dev@zealish.com> - 0.8.0-1
+- Open photos and videos in an in-app viewer instead of an external application
+- Overlay the download control on the thumbnail, as a play button for video
+- Fix attachments rendering as nothing in message rows
+- Stop scrolling stuttering on chats with attachments
+- Serve chat-list reads from a pool that does not queue behind history sync
+
 * Sat Sep 12 2026 Zealish <dev@zealish.com> - 0.7.1-1
 - Open a chat on a single click instead of requiring a second one
 - Keep the chat list's scroll position when a chat is opened

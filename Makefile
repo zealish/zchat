@@ -4,7 +4,7 @@ UI_DIR := apps/desktop/ui
 BUILD_DIR := build
 DIST_DIR := dist
 APP_ID := com.zealish.ZChat
-VERSION ?= 0.7.1
+VERSION ?= 0.8.0
 GO_LDFLAGS ?=
 FLATPAK_BUILDER ?= flatpak-builder
 # main.version is stamped into both binaries so the About dialog and --version
