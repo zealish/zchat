@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
   source:
     runs-on: ubuntu-latest
@@ -13,7 +16,7 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          dnf install -y gcc git make \
+          dnf install -y gcc git make rpm-build golang \
             gtk4-devel libadwaita-devel blueprint-compiler
       - uses: actions/checkout@v4
       # The checkout is owned by a different uid than the container user, so
@@ -29,3 +32,12 @@ jobs:
       - run: go test ./...
       - run: go build ./apps/daemon
       - run: go build ./apps/desktop
+
+      # The spec builds from the vendored tarball, so `make rpm` needs the
+      # generated UI resources already present in the working copy.
+      - name: Build RPM
+        run: make rpm VERSION="${GITHUB_REF_NAME#v}"
+      - name: Attach RPM to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.rpm
