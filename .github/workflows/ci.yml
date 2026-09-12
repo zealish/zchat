@@ -16,6 +16,9 @@ jobs:
           dnf install -y gcc git make \
             gtk4-devel libadwaita-devel blueprint-compiler
       - uses: actions/checkout@v4
+      # The checkout is owned by a different uid than the container user, so
+      # git refuses to report status and go's VCS stamping fails.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # Fedora's golang package trails the go directive in go.mod, so the
       # toolchain comes from setup-go rather than the container.
       - uses: actions/setup-go@v5
